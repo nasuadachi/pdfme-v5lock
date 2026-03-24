@@ -8,6 +8,7 @@ import {
 import { isEditable } from '../utils.js';
 import { getFontKitFont } from '../text/helper.js';
 import { substituteVariables } from './helper.js';
+import { countUniqueVariableNames, getVariableIndices } from './variables.js';
 
 export const uiRender = async (arg: UIRenderProps<MultiVariableTextSchema>) => {
   const { value, schema, rootElement, mode, onChange, ...rest } = arg;
@@ -86,16 +87,18 @@ const formUiRender = async (arg: UIRenderProps<MultiVariableTextSchema>) => {
   let inVarString = false;
 
   for (let i = 0; i < rawText.length; i++) {
-    if (variableIndices[i]) {
+    const variableName = variableIndices[i];
+
+    if (variableName) {
       inVarString = true;
       let span = document.createElement('span');
       span.style.outline = `${theme.colorPrimary} dashed 1px`;
       makeElementPlainTextContentEditable(span);
-      span.textContent = variables[variableIndices[i]];
+      span.textContent = variables[variableName];
       span.addEventListener('blur', (e: Event) => {
         const newValue = (e.target as HTMLSpanElement).textContent || '';
-        if (newValue !== variables[variableIndices[i]]) {
-          variables[variableIndices[i]] = newValue;
+        if (newValue !== variables[variableName]) {
+          variables[variableName] = newValue;
           if (onChange) onChange({ key: 'content', value: JSON.stringify(variables) });
           if (stopEditing) stopEditing();
         }
@@ -112,30 +115,6 @@ const formUiRender = async (arg: UIRenderProps<MultiVariableTextSchema>) => {
       textBlock.appendChild(span);
     }
   }
-};
-
-const getVariableIndices = (content: string) => {
-  const regex = /\{([^}]+)}/g;
-  const indices = [];
-  let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    indices[match.index] = match[1];
-  }
-
-  return indices;
-};
-
-const countUniqueVariableNames = (content: string) => {
-  const regex = /\{([^}]+)}/g;
-  const uniqueMatchesSet = new Set();
-  let match;
-
-  while ((match = regex.exec(content)) !== null) {
-    uniqueMatchesSet.add(match[1]);
-  }
-
-  return uniqueMatchesSet.size;
 };
 
 /**

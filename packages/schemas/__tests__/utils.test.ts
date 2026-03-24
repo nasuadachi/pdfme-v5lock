@@ -284,4 +284,21 @@ describe('createSvgStr', () => {
       expect(svgStr).toContain(`${key}="${value}"`);
     });
   });
+
+  it('should escape attribute values and drop unsafe attributes', () => {
+    const icon = createSvgStr(
+      [['path', { d: 'M0 0', fill: '"quote" & <tag>', onload: 'alert(1)' }]] as unknown as IconNode,
+      { stroke: '"quote" & <tag>', onload: 'alert(1)' } as Record<string, string>,
+    );
+
+    expect(icon).toContain('fill="&quot;quote&quot; &amp; &lt;tag&gt;"');
+    expect(icon).toContain('stroke="&quot;quote&quot; &amp; &lt;tag&gt;"');
+    expect(icon).not.toContain(' onload=');
+  });
+
+  it('should reject unsupported SVG tags', () => {
+    expect(() =>
+      createSvgStr([['script', { d: 'M0 0' }]] as unknown as IconNode),
+    ).toThrow('Invalid SVG tag name: script');
+  });
 });

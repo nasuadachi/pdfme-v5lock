@@ -213,9 +213,90 @@ export const createSvgStr = (icon: IconNode, attrs?: Record<string, string>): st
   // In lucide 0.475.0, the icon is an array of elements, not a single SVG element
   // We need to create an SVG wrapper and add the elements as children
 
+  const safeTagNames = new Set([
+    'svg',
+    'circle',
+    'ellipse',
+    'g',
+    'line',
+    'path',
+    'polygon',
+    'polyline',
+    'rect',
+  ]);
+  const safeAttributeNames = new Set([
+    'aria-hidden',
+    'aria-label',
+    'class',
+    'clip-rule',
+    'cx',
+    'cy',
+    'd',
+    'fill',
+    'fill-opacity',
+    'fill-rule',
+    'focusable',
+    'height',
+    'id',
+    'opacity',
+    'points',
+    'preserveAspectRatio',
+    'r',
+    'role',
+    'rx',
+    'ry',
+    'stroke',
+    'stroke-dasharray',
+    'stroke-dashoffset',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-miterlimit',
+    'stroke-opacity',
+    'stroke-width',
+    'transform',
+    'vector-effect',
+    'viewBox',
+    'width',
+    'x',
+    'x1',
+    'x2',
+    'xmlns',
+    'xmlns:xlink',
+    'y',
+    'y1',
+    'y2',
+  ]);
+  const escapeHtmlAttribute = (value: string): string =>
+    value
+      .replaceAll('&', '&amp;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+  const escapeHtmlText = (value: string): string =>
+    value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const toSafeAttributeString = (attributes: Record<string, string>): string =>
+    Object.entries(attributes)
+      .filter(
+        ([key, value]) =>
+          safeAttributeNames.has(key) &&
+          value !== undefined &&
+          value !== null &&
+          !key.toLowerCase().startsWith('on'),
+      )
+      .map(([key, value]) => `${key}="${escapeHtmlAttribute(String(value))}"`)
+      .join(' ');
+  const toSafeTagName = (tag: unknown): string => {
+    const tagName = String(tag);
+    if (!safeTagNames.has(tagName)) {
+      throw new Error(`Invalid SVG tag name: ${tagName}`);
+    }
+    return tagName;
+  };
+
   // Handle non-array input
   if (!Array.isArray(icon)) {
-    return String(icon);
+    return escapeHtmlText(String(icon));
   }
 
   // Create default SVG attributes
@@ -231,16 +312,12 @@ export const createSvgStr = (icon: IconNode, attrs?: Record<string, string>): st
     'stroke-linejoin': 'round',
     ...(attrs || {}),
   };
-
-  // Format SVG attributes string
-  const svgAttrString = Object.entries(svgAttrs)
-    .map(([key, value]) => `${key}="${value}"`)
-    .join(' ');
+  const svgAttrString = toSafeAttributeString(svgAttrs);
 
   // Helper function to process a single element
   const processElement = (element: unknown): string => {
     if (!Array.isArray(element)) {
-      return String(element);
+      return escapeHtmlText(String(element));
     }
 
     const [tag, attributes = {}, children = []] = element as [
@@ -248,12 +325,8 @@ export const createSvgStr = (icon: IconNode, attrs?: Record<string, string>): st
       Record<string, string>,
       unknown[],
     ];
-    const tagName = String(tag);
-
-    // Format attributes string
-    const attrString = Object.entries(attributes)
-      .map(([key, value]) => `${key}="${value}"`)
-      .join(' ');
+    const tagName = toSafeTagName(tag);
+    const attrString = toSafeAttributeString(attributes);
 
     // Process children recursively
     let childrenString = '';
