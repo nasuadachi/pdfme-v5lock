@@ -44,7 +44,10 @@ const DetailView = (props: DetailViewProps) => {
   const { token } = theme.useToken();
 
   const { schemasList, changeSchemas, deselectSchema, activeSchema, pageSize, basePdf } = props;
-  const form = useForm();
+  const formInstance = useForm();
+  // form-render returns a new wrapper each render; keep one so schema updates do not reset focused fields.
+  const formRef = useRef(formInstance);
+  const form = formRef.current;
 
   const i18n = useContext(I18nContext);
   const pluginsRegistry = useContext(PluginsRegistry);
