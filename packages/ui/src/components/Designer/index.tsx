@@ -1,4 +1,11 @@
-import React, { useRef, useState, useContext, useCallback, useEffect, useLayoutEffect } from 'react';
+import React, {
+  useRef,
+  useState,
+  useContext,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+} from 'react';
 import {
   cloneDeep,
   ZOOM,
@@ -110,17 +117,17 @@ const TemplateEditor = ({
     setHoveringSchemaId(null);
   };
 
-  // Update component state only when _options_ changes
-  // Ignore exhaustive useEffect dependency warnings here
   useEffect(() => {
-    if (typeof options.zoomLevel === 'number' && options.zoomLevel !== zoomLevel) {
+    if (typeof options.zoomLevel === 'number') {
       setZoomLevel(options.zoomLevel);
     }
-    if (typeof options.sidebarOpen === 'boolean' && options.sidebarOpen !== sidebarOpen) {
+  }, [options.zoomLevel]);
+
+  useEffect(() => {
+    if (typeof options.sidebarOpen === 'boolean') {
       setSidebarOpen(options.sidebarOpen);
     }
-    // eslint-disable-next-line
-  }, [options]);
+  }, [options.sidebarOpen]);
 
   useScrollPageCursor({
     ref: canvasRef,
@@ -283,7 +290,7 @@ const TemplateEditor = ({
     }
 
     commitSchemas(schemasList[pageCursor].concat(s));
-    setTimeout(() => onEdit([document.getElementById(s.id)!]));
+    setTimeout(() => onEdit([document.getElementById(s.id)]));
   };
 
   const onSortEnd = (sortedSchemas: SchemaForUI[]) => {
@@ -380,7 +387,11 @@ const TemplateEditor = ({
         }}
         onDragStart={onEditEnd}
       >
-        <LeftSidebar height={canvasHeight} scale={scale} basePdf={template.basePdf} />
+        <LeftSidebar
+          height={canvasHeight}
+          scale={scale}
+          basePdf={template.basePdf}
+        />
 
         <div
           style={{
