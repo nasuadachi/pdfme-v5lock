@@ -1,5 +1,6 @@
 import { useForm } from 'form-render';
-import React, { useRef, useContext, useState, useEffect, useCallback } from 'react';
+import type { Schema as FormRenderSchema } from 'form-render';
+import React, { useRef, useContext, useEffect, useCallback, useMemo } from 'react';
 import type {
   Dict,
   ChangeSchemaItem,
@@ -40,6 +41,8 @@ type DetailViewProps = Pick<
   activeSchema: SchemaForUI;
 };
 
+type WidgetMap = Record<string, (props: PropPanelWidgetProps) => React.JSX.Element>;
+
 const DetailView = (props: DetailViewProps) => {
   const { token } = theme.useToken();
 
@@ -62,12 +65,8 @@ const DetailView = (props: DetailViewProps) => {
     [i18n],
   );
 
-  const [widgets, setWidgets] = useState<{
-    [key: string]: (props: PropPanelWidgetProps) => React.JSX.Element;
-  }>({});
-
-  useEffect(() => {
-    const newWidgets: typeof widgets = {
+  const widgets = useMemo<WidgetMap>(() => {
+    const newWidgets: WidgetMap = {
       AlignWidget: (p) => <AlignWidget {...p} {...props} options={options} />,
       Divider: () => (
         <Divider style={{ marginTop: token.marginXS, marginBottom: token.marginXS }} />
@@ -75,8 +74,11 @@ const DetailView = (props: DetailViewProps) => {
       ButtonGroup: (p) => <ButtonGroupWidget {...p} {...props} options={options} />,
     };
     for (const plugin of pluginsRegistry.values()) {
-      const widgets = plugin.propPanel.widgets || {};
-      Object.entries(widgets).forEach(([widgetKey, widgetValue]) => {
+      const pluginWidgets = (plugin.propPanel.widgets ?? {}) as Record<
+        string,
+        (props: PropPanelWidgetProps) => void
+      >;
+      Object.entries(pluginWidgets).forEach(([widgetKey, widgetValue]) => {
         newWidgets[widgetKey] = (p) => (
           <WidgetRenderer
             {...p}
@@ -89,10 +91,10 @@ const DetailView = (props: DetailViewProps) => {
         );
       });
     }
-    setWidgets(newWidgets);
-  }, [activeSchema, pluginsRegistry, JSON.stringify(options)]);
+    return newWidgets;
+  }, [options, pluginsRegistry, props, token, typedI18n]);
 
-  useEffect(() => form.resetFields(), [activeSchema.id]);
+  useEffect(() => form.resetFields(), [activeSchema.id, form]);
 
   useEffect(() => {
     // Create a type-safe copy of the schema with editable property
@@ -101,7 +103,7 @@ const DetailView = (props: DetailViewProps) => {
     const readOnly = typeof values.readOnly === 'boolean' ? values.readOnly : false;
     values.editable = !readOnly;
     form.setValues(values);
-  }, [activeSchema]);
+  }, [activeSchema, form]);
 
   useEffect(() => {
     uniqueSchemaName.current = (value: string): boolean => {
@@ -117,10 +119,7 @@ const DetailView = (props: DetailViewProps) => {
   }, [schemasList, activeSchema]);
 
   // Reference to a function that validates schema name uniqueness
-  const uniqueSchemaName = useRef(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    (_unused: string): boolean => true,
-  );
+  const uniqueSchemaName = useRef<(value: string) => boolean>(() => true);
 
   // Use proper type for validator function parameter
   const validateUniqueSchemaName = (_: unknown, value: string): boolean =>
@@ -183,6 +182,11 @@ const DetailView = (props: DetailViewProps) => {
           changes.push({ key: 'readOnly', value: readOnlyValue, schemaId: activeSchema.id });
           if (readOnlyValue) {
             changes.push({ key: 'required', value: false, schemaId: activeSchema.id });
+          } else if (
+            activeSchema.type === 'text' &&
+            (activeSchema as Record<string, unknown>).textFormat === 'inline-markdown'
+          ) {
+            changes.push({ key: 'textFormat', value: 'plain', schemaId: activeSchema.id });
           }
           continue;
         }
@@ -455,7 +459,7 @@ const DetailView = (props: DetailViewProps) => {
       <SidebarBody>
         <FormRenderComponent
           form={form}
-          schema={propPanelSchema}
+          schema={propPanelSchema as unknown as FormRenderSchema}
           widgets={widgets}
           watch={{ '#': handleWatch }}
           locale="en-US"
