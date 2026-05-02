@@ -1,6 +1,6 @@
 {
   "name": "root",
-  "version": "0.0.0",
+  "version": "5.5.11-v5lock.0",
   "private": true,
   "author": "hand-dot",
   "license": "MIT",
@@ -48,6 +48,7 @@
     "build:generator": "npm run -w packages/generator build",
     "build:manipulator": "npm run -w packages/manipulator build",
     "build:ui": "npm run -w packages/ui build",
+    "pack:local": "mkdir -p ${PACK_DEST:-./dist-tarballs/pdfme} && npm pack --workspace @pdfme/common --workspace @pdfme/converter --workspace @pdfme/generator --workspace @pdfme/schemas --workspace @pdfme/ui --pack-destination ${PACK_DEST:-./dist-tarballs/pdfme}",
     "test": "npm run test --workspaces",
     "test:ui:update-snapshots": "npm run -w packages/ui test -- -u",
     "lint": "npm run lint --workspaces",

@@ -6,6 +6,8 @@
 .cache
 dist
 coverage/
+/.npm-cache
+/dist-tarballs
 
 **/repomix-output.{txt,xml}
 
