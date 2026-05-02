@@ -50,7 +50,7 @@
     "build:node": "tsc -p tsconfig.node.json",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts src --config eslint.config.mjs",
-    "test": "jest",
+    "test": "jest && vitest run",
     "prune": "ts-prune src",
     "prettier": "prettier --write 'src/**/*.ts'"
   },
@@ -59,18 +59,19 @@
     "air-datepicker": "^3.6.0",
     "bwip-js": "^4.8.0",
     "date-fns": "^4.1.0",
-    "fontkit": "^2.0.2",
     "dompurify": "^3.3.3",
+    "fontkit": "^2.0.2",
     "lucide": "^0.577.0"
   },
   "devDependencies": {
     "@pdfme/common": "*",
-    "@types/dompurify": "^3.2.0",
     "@types/bwip-js": "^3.2.1",
+    "@types/dompurify": "^3.2.0",
     "@types/fontkit": "^2.0.9",
     "@types/pngjs": "^6.0.2",
     "jsqr": "^1.4.0",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "vitest": "^4.1.5"
   },
   "peerDependencies": {
     "@pdfme/common": "latest"
@@ -91,6 +92,10 @@
     },
     "testMatch": [
       "**/*.test.ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "image.test.ts"
     ]
   },
   "publishConfig": {

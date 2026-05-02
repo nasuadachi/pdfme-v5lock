@@ -43,7 +43,7 @@
     "build:node": "tsc -p tsconfig.node.json",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts src --config eslint.config.mjs",
-    "test": "jest",
+    "test": "jest && vitest run",
     "prune": "ts-prune src",
     "prettier": "prettier --write 'src/**/*.ts'"
   },
@@ -73,6 +73,10 @@
     },
     "testMatch": [
       "**/*.test.ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "expression.test.ts"
     ]
   },
   "publishConfig": {
