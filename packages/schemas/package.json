@@ -26,20 +26,20 @@
   "types": "dist/types/src/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/types/src/index.d.ts",
       "import": {
         "node": "./dist/node/src/index.js",
         "default": "./dist/esm/src/index.js"
       },
-      "require": "./dist/cjs/src/index.js",
-      "types": "./dist/types/src/index.d.ts"
+      "require": "./dist/cjs/src/index.js"
     },
     "./utils": {
+      "types": "./dist/types/src/utils.d.ts",
       "import": {
         "node": "./dist/node/src/utils.js",
         "default": "./dist/esm/src/utils.js"
       },
-      "require": "./dist/cjs/src/utils.js",
-      "types": "./dist/types/src/utils.d.ts"
+      "require": "./dist/cjs/src/utils.js"
     }
   },
   "scripts": {

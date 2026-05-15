@@ -5,6 +5,10 @@ import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJSWorker as unknown as string;
+const pdfJsDocumentOptions = {
+  isEvalSupported: false,
+  verbosity: pdfjsLib.VerbosityLevel.ERRORS,
+};
 
 function dataURLToArrayBuffer(dataURL: string): ArrayBuffer {
   // Split out the actual base64 string from the data URL scheme
@@ -29,7 +33,7 @@ export const pdf2img = async (
   options: Pdf2ImgOptions = {},
 ): Promise<ArrayBuffer[]> =>
   _pdf2img(pdf, options, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, isEvalSupported: false }).promise,
+    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
     createCanvas: (width, height) => {
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -45,7 +49,7 @@ export const pdf2img = async (
 
 export const pdf2size = async (pdf: ArrayBuffer | Uint8Array, options: Pdf2SizeOptions = {}) =>
   _pdf2size(pdf, options, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, isEvalSupported: false }).promise,
+    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
   });
 
 export { img2pdf } from './img2pdf.js';

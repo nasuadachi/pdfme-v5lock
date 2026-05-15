@@ -6,13 +6,17 @@ import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJSWorker as unknown as string;
+const pdfJsDocumentOptions = {
+  isEvalSupported: false,
+  verbosity: pdfjsLib.VerbosityLevel.ERRORS,
+};
 
 export const pdf2img = async (
   pdf: ArrayBuffer | Uint8Array,
   options: Pdf2ImgOptions = {},
 ): Promise<ArrayBuffer[]> =>
   _pdf2img(pdf, options, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, isEvalSupported: false }).promise,
+    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
     createCanvas: (width, height) => createCanvas(width, height) as unknown as HTMLCanvasElement,
     canvasToArrayBuffer: (canvas) => {
       // Using a more specific type for the canvas from the 'canvas' package
@@ -27,7 +31,7 @@ export const pdf2img = async (
 
 export const pdf2size = async (pdf: ArrayBuffer | Uint8Array, options: Pdf2SizeOptions = {}) =>
   _pdf2size(pdf, options, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, isEvalSupported: false }).promise,
+    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
   });
 
 export { img2pdf } from './img2pdf.js';

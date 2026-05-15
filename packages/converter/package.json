@@ -26,10 +26,10 @@
   "types": "dist/types/src/index.node.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/types/src/index.node.d.ts",
       "browser": "./dist/esm/src/index.browser.js",
       "node": "./dist/cjs/src/index.node.js",
-      "default": "./dist/esm/src/index.browser.js",
-      "types": "./dist/types/src/index.node.d.ts"
+      "default": "./dist/esm/src/index.browser.js"
     }
   },
   "scripts": {

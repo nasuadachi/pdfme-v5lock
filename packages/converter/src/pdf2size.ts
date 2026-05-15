@@ -19,15 +19,22 @@ export async function pdf2size(
 
   const pdfDoc = await getDocument(pdf);
 
-  const promises = Promise.all(
-    new Array(pdfDoc.numPages).fill('').map(async (_, i) => {
-      return await pdfDoc.getPage(i + 1).then((page) => {
-        const { height, width } = page.getViewport({ scale, rotation: 0 });
+  try {
+    const promises = Promise.all(
+      new Array(pdfDoc.numPages).fill('').map(async (_, i) => {
+        const page = await pdfDoc.getPage(i + 1);
+        try {
+          const { height, width } = page.getViewport({ scale, rotation: 0 });
 
-        return { height: pt2mm(height), width: pt2mm(width) };
-      });
-    }),
-  );
+          return { height: pt2mm(height), width: pt2mm(width) };
+        } finally {
+          page.cleanup();
+        }
+      }),
+    );
 
-  return promises;
+    return promises;
+  } finally {
+    await pdfDoc.cleanup();
+  }
 }
