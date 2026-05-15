@@ -161,7 +161,7 @@ const generate = async (props: GenerateProps): Promise<Uint8Array> => {
 
   postProcessing({ pdfDoc, options });
 
-  return pdfDoc.save();
+  return pdfDoc.save({ dispose: true });
 };
 
 export default generate;

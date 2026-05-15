@@ -1,6 +1,8 @@
 // @ts-ignore
 import { generate } from '@pdfme/generator';
 import { pdf2img as nodePdf2Img, pdf2size as nodePdf2Size, img2pdf } from '../src/index.node.js';
+import { pdf2img as rawPdf2Img } from '../src/pdf2img.js';
+import { pdf2size as rawPdf2Size } from '../src/pdf2size.js';
 
 describe('pdf2img tests', () => {
   let pdfArrayBuffer: ArrayBuffer | Uint8Array;
@@ -61,6 +63,33 @@ describe('pdf2img tests', () => {
     await expect(nodePdf2Img(emptyBuffer, { scale: 1 })).rejects.toThrow(
       'The PDF file is empty, i.e. its size is zero by'
     );
+  });
+
+  test('cleans up page and destroys document when rendering fails', async () => {
+    const cleanup = jest.fn();
+    const destroy = jest.fn().mockResolvedValue(undefined);
+    const page = {
+      getViewport: jest.fn().mockReturnValue({ width: 10, height: 10 }),
+      render: jest.fn().mockReturnValue({ promise: Promise.reject(new Error('render failed')) }),
+      cleanup,
+    };
+    const pdfDoc = {
+      numPages: 1,
+      getPage: jest.fn().mockResolvedValue(page),
+      destroy,
+    };
+    const canvas = {
+      getContext: jest.fn().mockReturnValue({}),
+    } as unknown as HTMLCanvasElement;
+    const env = {
+      getDocument: jest.fn().mockResolvedValue(pdfDoc),
+      createCanvas: jest.fn().mockReturnValue(canvas),
+      canvasToArrayBuffer: jest.fn(),
+    } as unknown as Parameters<typeof rawPdf2Img>[2];
+
+    await expect(rawPdf2Img(new Uint8Array([1]), {}, env)).rejects.toThrow('render failed');
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 });
 describe('img2pdf tests', () => {
@@ -210,5 +239,37 @@ describe('pdf2size tests', () => {
     await expect(nodePdf2Size(emptyBuffer, { scale: 1 })).rejects.toThrow(
       'The PDF file is empty, i.e. its size is zero by'
     );
+  });
+
+  test('waits for page cleanup before destroying document when a page fails', async () => {
+    const order: string[] = [];
+    const failingPage = {
+      getViewport: jest.fn(() => {
+        throw new Error('size failed');
+      }),
+      cleanup: jest.fn(() => order.push('cleanup1')),
+    };
+    const slowPage = {
+      getViewport: jest.fn(() => ({ width: 20, height: 30 })),
+      cleanup: jest.fn(() => order.push('cleanup2')),
+    };
+    const pdfDoc = {
+      numPages: 2,
+      getPage: jest.fn(async (pageNumber: number) => {
+        if (pageNumber === 2) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return pageNumber === 1 ? failingPage : slowPage;
+      }),
+      destroy: jest.fn(async () => {
+        order.push('destroy');
+      }),
+    };
+    const env = {
+      getDocument: jest.fn().mockResolvedValue(pdfDoc),
+    } as unknown as Parameters<typeof rawPdf2Size>[2];
+
+    await expect(rawPdf2Size(new Uint8Array([1]), {}, env)).rejects.toThrow('size failed');
+    expect(order).toEqual(['cleanup1', 'cleanup2', 'destroy']);
   });
 });

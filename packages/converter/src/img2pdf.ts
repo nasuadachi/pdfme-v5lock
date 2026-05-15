@@ -98,7 +98,7 @@ export async function img2pdf(
         throw new Error(`Failed to process image: ${(error as Error).message}`);
       }
     }
-    const pdfUint8Array = await doc.save();
+    const pdfUint8Array = await doc.save({ dispose: true });
     // Create a new ArrayBuffer from the Uint8Array to ensure we return only ArrayBuffer
     const buffer = new ArrayBuffer(pdfUint8Array.byteLength);
     const view = new Uint8Array(buffer);

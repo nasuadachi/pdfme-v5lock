@@ -42,27 +42,30 @@ export async function pdf2img(
 
       for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
         const page = await pdfDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale });
+        try {
+          const viewport = page.getViewport({ scale });
 
-        const canvas = createCanvas(viewport.width, viewport.height);
-        if (!canvas) {
-          throw new Error('Failed to create canvas');
+          const canvas = createCanvas(viewport.width, viewport.height);
+          if (!canvas) {
+            throw new Error('Failed to create canvas');
+          }
+
+          const context = canvas.getContext('2d') as CanvasRenderingContext2D;
+          if (!context) {
+            throw new Error('Failed to get canvas context');
+          }
+
+          await page.render({ canvasContext: context, viewport }).promise;
+          const arrayBuffer = canvasToArrayBuffer(canvas, imageType);
+          results.push(arrayBuffer);
+        } finally {
+          page.cleanup();
         }
-
-        const context = canvas.getContext('2d') as CanvasRenderingContext2D;
-        if (!context) {
-          throw new Error('Failed to get canvas context');
-        }
-
-        await page.render({ canvasContext: context, viewport }).promise;
-        const arrayBuffer = canvasToArrayBuffer(canvas, imageType);
-        results.push(arrayBuffer);
-        page.cleanup();
       }
 
       return results;
     } finally {
-      await pdfDoc.cleanup();
+      await pdfDoc.destroy();
     }
   } catch (error) {
     throw new Error(`[@pdfme/converter] pdf2img failed: ${(error as Error).message}`);

@@ -20,7 +20,7 @@ export async function pdf2size(
   const pdfDoc = await getDocument(pdf);
 
   try {
-    const promises = Promise.all(
+    const results = await Promise.allSettled(
       new Array(pdfDoc.numPages).fill('').map(async (_, i) => {
         const page = await pdfDoc.getPage(i + 1);
         try {
@@ -33,8 +33,16 @@ export async function pdf2size(
       }),
     );
 
-    return promises;
+    const sizes: Size[] = [];
+    for (let i = 0; i < results.length; i += 1) {
+      const result = results[i];
+      if (result.status === 'rejected') {
+        throw result.reason;
+      }
+      sizes.push(result.value);
+    }
+    return sizes;
   } finally {
-    await pdfDoc.cleanup();
+    await pdfDoc.destroy();
   }
 }
