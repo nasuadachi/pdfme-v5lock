@@ -17,7 +17,8 @@ export { default as CustomFontSubsetEmbedder } from './embedders/CustomFontSubse
 export { default as FileEmbedder, AFRelationship } from './embedders/FileEmbedder';
 export { default as JpegEmbedder } from './embedders/JpegEmbedder';
 export { default as PngEmbedder } from './embedders/PngEmbedder';
-export { default as PDFPageEmbedder, type PageBoundingBox } from './embedders/PDFPageEmbedder';
+export { default as PDFPageEmbedder } from './embedders/PDFPageEmbedder';
+export type { PageBoundingBox } from './embedders/PDFPageEmbedder';
 
 export {
   default as ViewerPreferences,

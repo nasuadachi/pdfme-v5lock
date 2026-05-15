@@ -64,7 +64,11 @@ const clipSpace = ({ topLeft, topRight, bottomRight, bottomLeft }: Space) => [
   clip(),
   endPath(),
 ];
-const clipSpaces = (spaces: Space[]) => spaces.flatMap(clipSpace);
+const clipSpaces = (spaces: Space[]) =>
+  spaces.reduce<PDFOperator[]>(
+    (operators, space) => operators.concat(clipSpace(space)),
+    [],
+  );
 
 export const drawText = (line: PDFHexString, options: DrawTextOptions): PDFOperator[] =>
   [
