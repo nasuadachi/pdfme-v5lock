@@ -13,6 +13,7 @@ import {
   NonFullScreenPageMode,
   PrintScaling,
   ReadingDirection,
+  StandardFonts,
   ViewerPreferences,
 } from '../../src/index';
 
@@ -525,6 +526,20 @@ describe(`PDFDocument`, () => {
       };
 
       await expect(noErrorFunc()).resolves.not.toThrowError();
+    });
+
+    it(`can dispose the document after saving`, async () => {
+      const pdfDoc = await PDFDocument.create();
+      const page = pdfDoc.addPage([200, 100]);
+      const font = pdfDoc.embedStandardFont(StandardFonts.Helvetica);
+      page.drawText('dispose smoke test', { x: 20, y: 50, font, size: 12 });
+
+      const pdfBytes = await pdfDoc.save({ dispose: true });
+
+      expect(pdfBytes.byteLength).toBeGreaterThan(0);
+      expect(() => pdfDoc.getPageCount()).toThrow(
+        'PDFDocument has been disposed and can no longer be used',
+      );
     });
   });
 
