@@ -140,4 +140,9 @@ export default class PDFImage implements Embeddable {
     // See https://github.com/Hopding/pdf-lib/pull/1032/files.
     this.embedder = undefined;
   }
+
+  dispose(): void {
+    this.embedder = undefined;
+    this.embedTask = undefined;
+  }
 }

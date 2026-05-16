@@ -541,6 +541,39 @@ describe(`PDFDocument`, () => {
         'PDFDocument has been disposed and can no longer be used',
       );
     });
+
+    it(`disposes embedded asset wrappers held outside the document`, async () => {
+      type EmbeddableWithEmbedder = { embedder?: unknown };
+      type DocumentWithPrivateEmbeddables = {
+        embeddedFiles: unknown[];
+        javaScripts: unknown[];
+      };
+      const getEmbedder = (embeddable: unknown) =>
+        (embeddable as EmbeddableWithEmbedder).embedder;
+
+      const pdfDoc = await PDFDocument.create();
+      const image = await pdfDoc.embedPng(examplePngImage);
+      const [embeddedPage] = await pdfDoc.embedPdf(normalPdfBytes, [0]);
+      await pdfDoc.attach(new Uint8Array([1, 2, 3]), 'fixture.bin');
+      pdfDoc.addJavaScript('main', 'console.println("hello");');
+
+      const { embeddedFiles, javaScripts } =
+        pdfDoc as unknown as DocumentWithPrivateEmbeddables;
+      const embeddedFile = embeddedFiles[0];
+      const javaScript = javaScripts[0];
+
+      expect(getEmbedder(image)).toBeDefined();
+      expect(getEmbedder(embeddedPage)).toBeDefined();
+      expect(getEmbedder(embeddedFile)).toBeDefined();
+      expect(getEmbedder(javaScript)).toBeDefined();
+
+      pdfDoc.dispose();
+
+      expect(getEmbedder(image)).toBeUndefined();
+      expect(getEmbedder(embeddedPage)).toBeUndefined();
+      expect(getEmbedder(embeddedFile)).toBeUndefined();
+      expect(getEmbedder(javaScript)).toBeUndefined();
+    });
   });
 
   describe(`copy() method`, () => {

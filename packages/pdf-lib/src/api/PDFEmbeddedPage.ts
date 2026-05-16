@@ -96,4 +96,8 @@ export default class PDFEmbeddedPage implements Embeddable {
     await this.embedder.embedIntoContext(this.doc.context, this.ref);
     this.embedder = undefined;
   }
+
+  dispose(): void {
+    this.embedder = undefined;
+  }
 }

@@ -257,6 +257,18 @@ export default class PDFDocument {
     for (let idx = 0, len = this.fonts.length; idx < len; idx++) {
       this.fonts[idx].dispose();
     }
+    for (let idx = 0, len = this.images.length; idx < len; idx++) {
+      this.images[idx].dispose();
+    }
+    for (let idx = 0, len = this.embeddedPages.length; idx < len; idx++) {
+      this.embeddedPages[idx].dispose();
+    }
+    for (let idx = 0, len = this.embeddedFiles.length; idx < len; idx++) {
+      this.embeddedFiles[idx].dispose();
+    }
+    for (let idx = 0, len = this.javaScripts.length; idx < len; idx++) {
+      this.javaScripts[idx].dispose();
+    }
     this.fonts.length = 0;
     this.images.length = 0;
     this.embeddedPages.length = 0;

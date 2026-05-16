@@ -84,4 +84,8 @@ export default class PDFEmbeddedFile implements Embeddable {
 
     this.embedder = undefined;
   }
+
+  dispose(): void {
+    this.embedder = undefined;
+  }
 }

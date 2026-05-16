@@ -71,4 +71,8 @@ export default class PDFJavaScript implements Embeddable {
 
     this.embedder = undefined;
   }
+
+  dispose(): void {
+    this.embedder = undefined;
+  }
 }
