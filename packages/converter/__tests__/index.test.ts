@@ -4,6 +4,25 @@ import { pdf2img as nodePdf2Img, pdf2size as nodePdf2Size, img2pdf } from '../sr
 import { pdf2img as rawPdf2Img } from '../src/pdf2img.js';
 import { pdf2size as rawPdf2Size } from '../src/pdf2size.js';
 
+const isJpeg = (image: ArrayBuffer) => {
+  const bytes = new Uint8Array(image);
+  return bytes[0] === 0xff && bytes[1] === 0xd8;
+};
+
+const isPng = (image: ArrayBuffer) => {
+  const bytes = new Uint8Array(image);
+  return (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  );
+};
+
 describe('pdf2img tests', () => {
   let pdfArrayBuffer: ArrayBuffer | Uint8Array;
 
@@ -36,6 +55,27 @@ describe('pdf2img tests', () => {
     expect(images.length).toBe(4);
     expect(images[0]).toBeInstanceOf(ArrayBuffer);
     expect(images[0].byteLength).toBeGreaterThan(0);
+  });
+
+  test('Node.js version - respects imageType option', async () => {
+    const [defaultImage] = await nodePdf2Img(pdfArrayBuffer, {
+      scale: 1,
+      range: { start: 0, end: 0 },
+    });
+    const [jpegImage] = await nodePdf2Img(pdfArrayBuffer, {
+      scale: 1,
+      imageType: 'jpeg',
+      range: { start: 0, end: 0 },
+    });
+    const [pngImage] = await nodePdf2Img(pdfArrayBuffer, {
+      scale: 1,
+      imageType: 'png',
+      range: { start: 0, end: 0 },
+    });
+
+    expect(isPng(defaultImage)).toBe(true);
+    expect(isJpeg(jpegImage)).toBe(true);
+    expect(isPng(pngImage)).toBe(true);
   });
 
   test('pageNumbers option - should render only specified pages', async () => {

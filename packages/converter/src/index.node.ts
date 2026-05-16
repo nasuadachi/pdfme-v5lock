@@ -15,15 +15,14 @@ export const pdf2img = async (
   pdf: ArrayBuffer | Uint8Array,
   options: Pdf2ImgOptions = {},
 ): Promise<ArrayBuffer[]> =>
-  _pdf2img(pdf, options, {
+  _pdf2img(pdf, { ...options, imageType: options.imageType ?? 'png' }, {
     getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
     createCanvas: (width, height) => createCanvas(width, height) as unknown as HTMLCanvasElement,
-    canvasToArrayBuffer: (canvas) => {
+    canvasToArrayBuffer: (canvas, imageType) => {
       // Using a more specific type for the canvas from the 'canvas' package
       const nodeCanvas = canvas as unknown as import('canvas').Canvas;
-      // Get buffer from the canvas - using the synchronous version without parameters
-      // This will use the default PNG format
-      const buffer = nodeCanvas.toBuffer();
+      const buffer =
+        imageType === 'png' ? nodeCanvas.toBuffer('image/png') : nodeCanvas.toBuffer('image/jpeg');
       // Convert to ArrayBuffer
       return new Uint8Array(buffer).buffer;
     },

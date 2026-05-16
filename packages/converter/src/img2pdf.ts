@@ -4,6 +4,10 @@ import type { ImageType } from './types.js';
 
 interface Img2PdfOptions {
   scale?: number;
+  /**
+   * @deprecated This option is currently ignored. img2pdf detects each input image type from
+   * the image bytes and keeps this option only for backward compatibility.
+   */
   imageType?: ImageType;
   size?: { height: number; width: number }; // in millimeters
   margin?: [number, number, number, number]; // in millimeters [top, right, bottom, left]
