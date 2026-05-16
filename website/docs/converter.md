@@ -51,6 +51,7 @@ import { pdf2size } from '@pdfme/converter';
 const pdf = new ArrayBuffer(...); // Source PDF
 const sizes = await pdf2size(pdf, {
   scale: 1, // Scale factor (default: 1)
+  concurrency: 2, // Maximum concurrent page reads (default: 2)
 });
 // sizes: Array<{ width: number, height: number }>
 ```
@@ -99,6 +100,7 @@ interface Pdf2ImgOptions {
 
 interface Pdf2SizeOptions {
   scale?: number;
+  concurrency?: number; // Maximum concurrent page reads (default: 2)
 }
 
 interface Img2PdfOptions {

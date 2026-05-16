@@ -312,4 +312,64 @@ describe('pdf2size tests', () => {
     await expect(rawPdf2Size(new Uint8Array([1]), {}, env)).rejects.toThrow('size failed');
     expect(order).toEqual(['cleanup1', 'cleanup2', 'destroy']);
   });
+
+  test('limits page processing to 2 concurrent pages by default', async () => {
+    let activePages = 0;
+    let maxActivePages = 0;
+    const pdfDoc = {
+      numPages: 5,
+      getPage: jest.fn(async () => {
+        activePages += 1;
+        maxActivePages = Math.max(maxActivePages, activePages);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+
+        return {
+          getViewport: jest.fn(() => ({ width: 20, height: 30 })),
+          cleanup: jest.fn(() => {
+            activePages -= 1;
+          }),
+        };
+      }),
+      destroy: jest.fn(),
+    };
+    const env = {
+      getDocument: jest.fn().mockResolvedValue(pdfDoc),
+    } as unknown as Parameters<typeof rawPdf2Size>[2];
+
+    const sizes = await rawPdf2Size(new Uint8Array([1]), {}, env);
+
+    expect(sizes).toHaveLength(5);
+    expect(maxActivePages).toBe(2);
+    expect(pdfDoc.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('allows custom page processing concurrency', async () => {
+    let activePages = 0;
+    let maxActivePages = 0;
+    const pdfDoc = {
+      numPages: 6,
+      getPage: jest.fn(async () => {
+        activePages += 1;
+        maxActivePages = Math.max(maxActivePages, activePages);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+
+        return {
+          getViewport: jest.fn(() => ({ width: 20, height: 30 })),
+          cleanup: jest.fn(() => {
+            activePages -= 1;
+          }),
+        };
+      }),
+      destroy: jest.fn(),
+    };
+    const env = {
+      getDocument: jest.fn().mockResolvedValue(pdfDoc),
+    } as unknown as Parameters<typeof rawPdf2Size>[2];
+
+    const sizes = await rawPdf2Size(new Uint8Array([1]), { concurrency: 3 }, env);
+
+    expect(sizes).toHaveLength(6);
+    expect(maxActivePages).toBe(3);
+    expect(pdfDoc.destroy).toHaveBeenCalledTimes(1);
+  });
 });
