@@ -77,51 +77,56 @@ export const preprocessing = async (arg: { template: Template; userPlugins: Plug
   const staticSchema: Schema[] = isBlankPdf(basePdf) ? (basePdf.staticSchema ?? []) : [];
 
   const pdfDoc = await PDFDocument.create();
-  // @ts-expect-error registerFontkit method is not in type definitions but exists at runtime
-  pdfDoc.registerFontkit(fontkit);
+  try {
+    // @ts-expect-error registerFontkit method is not in type definitions but exists at runtime
+    pdfDoc.registerFontkit(fontkit);
 
-  const plugins = pluginRegistry(
-    Object.values(userPlugins).length > 0 ? userPlugins : builtInPlugins,
-  );
+    const plugins = pluginRegistry(
+      Object.values(userPlugins).length > 0 ? userPlugins : builtInPlugins,
+    );
 
-  const schemaTypes = Array.from(
-    new Set(
-      schemas
-        .flatMap((schemaPage: Schema[]) => schemaPage.map((schema: Schema) => schema.type))
-        .concat(staticSchema.map((schema: Schema) => schema.type)),
-    ),
-  );
+    const schemaTypes = Array.from(
+      new Set(
+        schemas
+          .flatMap((schemaPage: Schema[]) => schemaPage.map((schema: Schema) => schema.type))
+          .concat(staticSchema.map((schema: Schema) => schema.type)),
+      ),
+    );
 
-  const renderObj = schemaTypes.reduce(
-    (
-      acc: Record<
+    const renderObj = schemaTypes.reduce(
+      (
+        acc: Record<
+          string,
+          (arg: PDFRenderProps<Schema & { [key: string]: unknown }>) => Promise<void> | void
+        >,
+        type: string,
+      ) => {
+        const plugin = plugins.findByType(type);
+
+        if (!plugin || !plugin.pdf) {
+          throw new Error(`[@pdfme/generator] Plugin or renderer for type ${type} not found.
+Check this document: https://pdfme.com/docs/custom-schemas`);
+        }
+
+        // Use type assertion to handle the pdf function with schema type
+        return {
+          ...acc,
+          [type]: plugin.pdf as (
+            arg: PDFRenderProps<Schema & { [key: string]: unknown }>,
+          ) => Promise<void> | void,
+        };
+      },
+      {} as Record<
         string,
         (arg: PDFRenderProps<Schema & { [key: string]: unknown }>) => Promise<void> | void
       >,
-      type: string,
-    ) => {
-      const plugin = plugins.findByType(type);
+    );
 
-      if (!plugin || !plugin.pdf) {
-        throw new Error(`[@pdfme/generator] Plugin or renderer for type ${type} not found.
-Check this document: https://pdfme.com/docs/custom-schemas`);
-      }
-
-      // Use type assertion to handle the pdf function with schema type
-      return {
-        ...acc,
-        [type]: plugin.pdf as (
-          arg: PDFRenderProps<Schema & { [key: string]: unknown }>,
-        ) => Promise<void> | void,
-      };
-    },
-    {} as Record<
-      string,
-      (arg: PDFRenderProps<Schema & { [key: string]: unknown }>) => Promise<void> | void
-    >,
-  );
-
-  return { pdfDoc, renderObj };
+    return { pdfDoc, renderObj };
+  } catch (error) {
+    pdfDoc.dispose();
+    throw error;
+  }
 };
 
 export const postProcessing = (props: { pdfDoc: PDFDocument; options: GeneratorOptions }) => {

@@ -37,6 +37,8 @@ export async function img2pdf(
   imgs: ArrayBuffer[],
   options: Img2PdfOptions = {},
 ): Promise<ArrayBuffer> {
+  let doc: PDFDocument | undefined;
+
   try {
     const { scale = 1, size, margin = [0, 0, 0, 0] } = options;
 
@@ -44,7 +46,7 @@ export async function img2pdf(
       throw new Error('Input must be a non-empty array of image buffers');
     }
 
-    const doc = await PDFDocument.create();
+    doc = await PDFDocument.create();
     for (const img of imgs) {
       try {
         let image;
@@ -99,6 +101,7 @@ export async function img2pdf(
       }
     }
     const pdfUint8Array = await doc.save({ dispose: true });
+    doc = undefined;
     // Create a new ArrayBuffer from the Uint8Array to ensure we return only ArrayBuffer
     const buffer = new ArrayBuffer(pdfUint8Array.byteLength);
     const view = new Uint8Array(buffer);
@@ -106,5 +109,7 @@ export async function img2pdf(
     return buffer;
   } catch (error) {
     throw new Error(`[@pdfme/converter] img2pdf failed: ${(error as Error).message}`);
+  } finally {
+    doc?.dispose();
   }
 }
