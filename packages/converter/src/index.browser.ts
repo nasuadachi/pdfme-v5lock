@@ -10,23 +10,32 @@ const pdfJsDocumentOptions = {
   verbosity: pdfjsLib.VerbosityLevel.ERRORS,
 };
 
-function dataURLToArrayBuffer(dataURL: string): ArrayBuffer {
-  // Split out the actual base64 string from the data URL scheme
-  const base64String = dataURL.split(',')[1];
-
-  // Decode the Base64 string to get the binary data
-  const byteString = atob(base64String);
-
-  // Create a typed array from the binary string
-  const arrayBuffer = new ArrayBuffer(byteString.length);
-  const uintArray = new Uint8Array(arrayBuffer);
-
-  for (let i = 0; i < byteString.length; i++) {
-    uintArray[i] = byteString.charCodeAt(i);
+const canvasToBlob = (
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  imageType: string,
+): Promise<Blob> => {
+  if ('convertToBlob' in canvas) {
+    return canvas.convertToBlob({ type: `image/${imageType}` });
   }
 
-  return arrayBuffer;
-}
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Failed to convert canvas to blob'));
+      }
+    }, `image/${imageType}`);
+  });
+};
+
+const canvasToArrayBuffer = async (
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  imageType: string,
+): Promise<ArrayBuffer> => {
+  const blob = await canvasToBlob(canvas, imageType);
+  return blob.arrayBuffer();
+};
 
 export const pdf2img = async (
   pdf: ArrayBuffer | Uint8Array,
@@ -40,11 +49,7 @@ export const pdf2img = async (
       canvas.height = height;
       return canvas;
     },
-    canvasToArrayBuffer: (canvas, imageType) => {
-      // Using type assertion to handle the canvas method
-      const dataUrl = (canvas as HTMLCanvasElement).toDataURL(`image/${imageType}`);
-      return dataURLToArrayBuffer(dataUrl);
-    },
+    canvasToArrayBuffer,
   });
 
 export const pdf2size = async (pdf: ArrayBuffer | Uint8Array, options: Pdf2SizeOptions = {}) =>

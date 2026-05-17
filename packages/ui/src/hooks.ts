@@ -4,8 +4,6 @@ import {
   ZOOM,
   Template,
   Size,
-  getB64BasePdf,
-  b64toUint8Array,
   SchemaForUI,
   ChangeSchemas,
   isBlankPdf,
@@ -17,7 +15,8 @@ import {
   uuid,
   getUniqueSchemaName,
   moveCommandToChangeSchemasArg,
-  arrayBufferToBase64,
+  arrayBufferToObjectUrl,
+  basePdfToArrayBuffer,
   initShortCuts,
   destroyShortCuts,
 } from './helper.js';
@@ -37,12 +36,27 @@ const getScale = (n: number, paper: number) =>
 
 type UIPreProcessorProps = { template: Template; size: Size; zoomLevel: number; maxZoom: number };
 
+const BLANK_BACKGROUND =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdj+P///38ACfsD/QVDRcoAAAAASUVORK5CYII=';
+
 export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreProcessorProps) => {
   const [backgrounds, setBackgrounds] = useState<string[]>([]);
   const [pageSizes, setPageSizes] = useState<Size[]>([]);
   const [scale, setScale] = useState(0);
   const [error, setError] = useState<Error | null>(null);
   const initSeqRef = useRef(0);
+  const backgroundObjectUrlsRef = useRef<string[]>([]);
+
+  const revokeBackgroundObjectUrls = () => {
+    backgroundObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    backgroundObjectUrlsRef.current = [];
+  };
+
+  const setBackgroundState = (nextBackgrounds: string[], objectUrls: string[] = []) => {
+    revokeBackgroundObjectUrls();
+    backgroundObjectUrlsRef.current = objectUrls;
+    setBackgrounds(nextBackgrounds);
+  };
 
   const init = async (prop: { template: Template; size: Size }) => {
     const {
@@ -53,24 +67,17 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     let paperWidth: number;
     let paperHeight: number;
     let _backgrounds: string[];
+    let _backgroundObjectUrls: string[] | undefined;
     let _pageSizes: { width: number; height: number }[];
 
     if (isBlankPdf(basePdf)) {
       const { width, height } = basePdf;
       paperWidth = width * ZOOM;
       paperHeight = height * ZOOM;
-      _backgrounds = schemas.map(
-        () =>
-          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAA1JREFUGFdj+P///38ACfsD/QVDRcoAAAAASUVORK5CYII=',
-      );
+      _backgrounds = schemas.map(() => BLANK_BACKGROUND);
       _pageSizes = schemas.map(() => ({ width, height }));
     } else {
-      const _basePdf = await getB64BasePdf(basePdf);
-
-      const uint8Array = b64toUint8Array(_basePdf);
-      // Create a new ArrayBuffer copy to avoid detachment issues
-      const pdfArrayBuffer = new ArrayBuffer(uint8Array.byteLength);
-      new Uint8Array(pdfArrayBuffer).set(uint8Array);
+      const pdfArrayBuffer = await basePdfToArrayBuffer(basePdf);
 
       const [_pages, imgBuffers] = await Promise.all([
         pdf2size(pdfArrayBuffer),
@@ -79,7 +86,8 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
       _pageSizes = _pages;
       paperWidth = _pageSizes[0].width * ZOOM;
       paperHeight = _pageSizes[0].height * ZOOM;
-      _backgrounds = imgBuffers.map(arrayBufferToBase64);
+      _backgroundObjectUrls = imgBuffers.map(arrayBufferToObjectUrl);
+      _backgrounds = _backgroundObjectUrls;
     }
 
     const _scale = Math.min(
@@ -89,6 +97,7 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
 
     return {
       backgrounds: _backgrounds,
+      backgroundObjectUrls: _backgroundObjectUrls,
       pageSizes: _pageSizes,
       scale: _scale,
     };
@@ -97,15 +106,18 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
   useEffect(() => {
     const initSeq = initSeqRef.current + 1;
     initSeqRef.current = initSeq;
-    setBackgrounds([]);
+    setBackgroundState([]);
     setError(null);
 
     init({ template, size })
-      .then(({ pageSizes, scale, backgrounds }) => {
-        if (initSeqRef.current !== initSeq) return;
+      .then(({ pageSizes, scale, backgrounds, backgroundObjectUrls }) => {
+        if (initSeqRef.current !== initSeq) {
+          backgroundObjectUrls?.forEach((url) => URL.revokeObjectURL(url));
+          return;
+        }
         setPageSizes(pageSizes);
         setScale(scale);
-        setBackgrounds(backgrounds);
+        setBackgroundState(backgrounds, backgroundObjectUrls ?? []);
       })
       .catch((err: Error) => {
         if (initSeqRef.current !== initSeq) return;
@@ -116,6 +128,7 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     return () => {
       if (initSeqRef.current === initSeq) {
         initSeqRef.current += 1;
+        revokeBackgroundObjectUrls();
       }
     };
   }, [template, size]);
@@ -130,12 +143,17 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
       initSeqRef.current = initSeq;
       setError(null);
 
-      return init({ template, size }).then(({ pageSizes, scale, backgrounds }) => {
-        if (initSeqRef.current !== initSeq) return;
-        setPageSizes(pageSizes);
-        setScale(scale);
-        setBackgrounds(backgrounds);
-      });
+      return init({ template, size }).then(
+        ({ pageSizes, scale, backgrounds, backgroundObjectUrls }) => {
+          if (initSeqRef.current !== initSeq) {
+            backgroundObjectUrls?.forEach((url) => URL.revokeObjectURL(url));
+            return;
+          }
+          setPageSizes(pageSizes);
+          setScale(scale);
+          setBackgroundState(backgrounds, backgroundObjectUrls ?? []);
+        },
+      );
     },
   };
 };

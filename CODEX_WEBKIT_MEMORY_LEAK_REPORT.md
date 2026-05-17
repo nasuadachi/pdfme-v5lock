@@ -22,8 +22,9 @@ Main worktree:
 
 ```text
 /Users/keitaro/git/pdfme-v5lock
-commit: 712c7414 test(pdf-lib): cover svg rendering fixtures
-label: current-v5lock2
+baseline commit: 712c7414 test(pdf-lib): cover svg rendering fixtures
+latest committed mitigation: 4eef07f6 Mitigate WebKit PDF memory retention
+label: current-v5lock2 / nasu-v5.5
 ```
 
 Comparison worktree:
@@ -123,6 +124,101 @@ Interpretation:
 - The active object URL count returns to zero, so this is not a simple missing
   `revokeObjectURL()` leak.
 
+## Real PDF Viewer Cycle Result
+
+Test PDF:
+
+```text
+/Users/keitaro/git/pdfme-v5lock/playground/test-3page.pdf
+size: 427 KB
+PDF version: 1.7
+```
+
+Temporary harness:
+
+```text
+/Users/keitaro/tmp/pdfme-test-3page-pdf-viewer-cycle.js
+```
+
+The harness uses one Playwright WebKit tab. Each cycle:
+
+1. Fetch `test-3page.pdf`.
+2. Create `Blob([arrayBuffer], { type: 'application/pdf' })`.
+3. Create an object URL.
+4. Display it in an iframe in the same tab.
+5. Dispose by clearing the iframe, removing it, and calling
+   `URL.revokeObjectURL(url)`.
+6. Wait and sample WebKit/Playwright process RSS.
+
+Command:
+
+```sh
+ITERATIONS=5 DISPLAY_MS=1500 DISPOSE_MS=10000 node /Users/keitaro/tmp/pdfme-test-3page-pdf-viewer-cycle.js
+```
+
+Result:
+
+| Phase | RSS | Delta | Object URLs | Iframes |
+| ----- | --: | ----: | ----------- | ------: |
+| before | 309.0 MB | 0.0 MB | 0 created / 0 revoked / 0 active | 0 |
+| after cooldown 1 | 349.4 MB | 40.4 MB | 1 created / 1 revoked / 0 active | 0 |
+| after cooldown 2 | 352.2 MB | 43.2 MB | 2 created / 2 revoked / 0 active | 0 |
+| after cooldown 3 | 354.3 MB | 45.3 MB | 3 created / 3 revoked / 0 active | 0 |
+| after cooldown 4 | 356.7 MB | 47.7 MB | 4 created / 4 revoked / 0 active | 0 |
+| after cooldown 5 | 359.2 MB | 50.2 MB | 5 created / 5 revoked / 0 active | 0 |
+
+Shorter dispose wait produced the same shape:
+
+```text
+ITERATIONS=5 DISPLAY_MS=2500 DISPOSE_MS=3000
+after cooldown 5: 358.5 MB RSS, +49.3 MB delta
+```
+
+Interpretation:
+
+This reproduces the real Safari/WebKit failure mode more directly than the
+generation-only tests. Even with no active object URLs and no iframe elements
+left in the document, WebKit RSS stays elevated and grows across repeated PDF
+viewer cycles. This strongly supports avoiding repeated blob PDF iframe/window
+preview on Safari/iPadOS.
+
+## Safari Measurement Plan
+
+Playwright WebKit is useful for cheap screening, but it is not enough for the
+final Safari leak decision. The next measurement path should use real Safari in
+two stages.
+
+Stage 1: replace the current browser harness with `safaridriver` +
+WebdriverIO.
+
+- Cost is low because the existing harness already serves a local HTML page and
+  uses simple DOM actions.
+- Use the same `test-3page.pdf` cycle first: display PDF blob URL in the same
+  tab, dispose, then repeat.
+- Continue sampling RSS via `ps`, but track real Safari/WebKit processes instead
+  of Playwright's bundled WebKit processes.
+- Keep the first metric simple: RSS delta after each dispose cooldown, object
+  URL created/revoked counts, and remaining iframe count.
+- Treat this as the gate for mitigation work. If real Safari does not show the
+  same growth, do not optimize based only on Playwright WebKit.
+
+Stage 2: if Stage 1 shows growth, use `xcrun xctrace` for detailed allocation
+analysis.
+
+- Capture an Instruments trace around the same 5-cycle and 30-cycle scenarios.
+- Start with Allocations / Leaks / VM Tracker style data, depending on which
+  templates are available locally.
+- Use this only after Stage 1 confirms the signal, because trace collection is
+  higher friction and less suitable for rapid iteration.
+
+Local tool status on 2026-05-17:
+
+```text
+safaridriver: available, Safari 26.5 (21624.2.5.11.4)
+WebdriverIO: not installed in this repo yet
+xcrun xctrace: not available in current developer path
+```
+
 ## Why v5lock Disposal Did Not Fix the Real Crash
 
 The disposal changes are still useful for JavaScript-side object graph cleanup:
@@ -165,6 +261,56 @@ npm run -w packages/ui build
 ```
 
 Status: passed.
+
+Additional mitigation under test:
+
+```text
+packages/converter/src/index.browser.ts
+packages/ui/src/helper.ts
+packages/ui/src/hooks.ts
+```
+
+Intent:
+
+- Avoid browser `canvas.toDataURL()` during `pdf2img`; use
+  `canvas.toBlob()` / `OffscreenCanvas.convertToBlob()` and then
+  `Blob.arrayBuffer()` instead.
+- Avoid storing rendered PDF page backgrounds as large base64 data URLs in UI
+  state; use image object URLs and revoke stale/old URLs.
+- Avoid `basePdf -> base64 -> Uint8Array` conversion in the UI when `basePdf`
+  is already an `ArrayBuffer` or `Uint8Array`.
+
+WebKit screening harness:
+
+```text
+/Users/keitaro/tmp/pdfme-background-memory-bench.js
+```
+
+Command:
+
+```sh
+ITERATIONS=200 SAMPLE_MS=1000 COOLDOWN_MS=8000 node /Users/keitaro/tmp/pdfme-background-memory-bench.js
+```
+
+Latest 200 iteration result:
+
+| Path | Max / last delta | Active object URLs | Result |
+| ---- | ---------------: | -----------------: | ------ |
+| old `toDataURL` + data URL background | 5.6 / 5.6 MB | 0 | baseline |
+| new `toBlob` + object URL background | 4.5 / 4.5 MB | 0 | about 1.1 MB lower |
+
+Earlier 200 iteration run showed a similar direction:
+
+| Path | Max / last delta | Active object URLs | Result |
+| ---- | ---------------: | -----------------: | ------ |
+| old `toDataURL` + data URL background | 5.8 / 5.8 MB | 0 | baseline |
+| new `toBlob` + object URL background | 5.0 / 5.0 MB | 0 | about 0.8 MB lower |
+
+Interpretation:
+
+This reduces browser-side peak/retained memory in the PDF-to-image background
+path, but the gain is modest. It does not address WebKit's larger PDF viewer
+retention problem from repeated PDF blob iframe/window preview.
 
 Known unrelated verification blockers:
 

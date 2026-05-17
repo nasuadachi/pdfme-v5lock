@@ -7,6 +7,7 @@ import {
   b64toUint8Array,
   Template,
   BasePdf,
+  CustomPdf,
   SchemaForUI,
   Size,
   isBlankPdf,
@@ -266,6 +267,24 @@ export const arrayBufferToBase64 = (arrayBuffer: ArrayBuffer): string => {
   }
 };
 
+export const arrayBufferToObjectUrl = (arrayBuffer: ArrayBuffer): string => {
+  const mimeType = detectMimeType(arrayBuffer) || 'application/octet-stream';
+  return URL.createObjectURL(new Blob([arrayBuffer], { type: mimeType }));
+};
+
+export const basePdfToArrayBuffer = async (basePdf: CustomPdf): Promise<ArrayBuffer> => {
+  if (basePdf instanceof Uint8Array) {
+    return basePdf.buffer.slice(basePdf.byteOffset, basePdf.byteOffset + basePdf.byteLength);
+  }
+
+  if (basePdf instanceof ArrayBuffer) {
+    return basePdf.slice(0);
+  }
+
+  const b64BasePdf = await getB64BasePdf(basePdf);
+  return b64toUint8Array(b64BasePdf).buffer;
+};
+
 const convertSchemasForUI = (template: Template): SchemaForUI[][] => {
   template.schemas.forEach((page) => {
     page.forEach((schema) => {
@@ -289,11 +308,7 @@ export const template2SchemasList = async (_template: Template) => {
       height: basePdf.height,
     }));
   } else {
-    const b64BasePdf = await getB64BasePdf(basePdf);
-    // pdf2size accepts both ArrayBuffer and Uint8Array
-    const pdfArrayBuffer = b64toUint8Array(b64BasePdf);
-
-    pageSizes = await pdf2size(pdfArrayBuffer);
+    pageSizes = await pdf2size(await basePdfToArrayBuffer(basePdf));
   }
 
   const ssl = schemasForUI.length;
