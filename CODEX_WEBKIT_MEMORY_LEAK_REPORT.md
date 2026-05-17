@@ -16,6 +16,66 @@ The strongest signal is that `URL.revokeObjectURL()` is being called and active
 object URL count returns to zero, but WebKit RSS still grows when the PDF is
 shown through the blob/iframe viewer path.
 
+## Move Investigation To `subkarte`
+
+The library-level work in this repository is now less likely to be the main
+fix. The calling application is:
+
+```text
+/Users/keitaro/git/subkarte
+```
+
+That app uses the local pdfme tarballs:
+
+```text
+vendor/pdfme/pdfme-common-5.5.11-v5lock.2.tgz
+vendor/pdfme/pdfme-converter-5.5.11-v5lock.2.tgz
+vendor/pdfme/pdfme-generator-5.5.11-v5lock.2.tgz
+vendor/pdfme/pdfme-schemas-5.5.11-v5lock.2.tgz
+vendor/pdfme/pdfme-ui-5.5.11-v5lock.2.tgz
+```
+
+Important finding in `subkarte`:
+
+```text
+/Users/keitaro/git/subkarte/src/app/client/internal-lib/pdf-handlers/pdf-form/pdf-form.component.ts
+```
+
+`PdfFormComponent` has two generated PDF preview/print paths that create a PDF
+blob URL and send it to Safari's PDF viewer:
+
+- `Print()` creates `new Blob([pdfData], { type: 'application/pdf' })`,
+  calls `URL.createObjectURL(blob)`, then assigns the blob URL to
+  `newWindow.location.href`.
+- `MakePdf()` does the same.
+
+This is not literally `iframe.src = blob:`, but it is the same WebKit problem
+class: repeatedly passing `blob:` PDF URLs into Safari's built-in PDF viewer.
+The real Safari and Simulator Safari tests in this report strongly suggest this
+path can retain WebKit PDF viewer memory even when object URLs are revoked.
+
+There is also a correctness issue in the current `subkarte` code:
+
+- `Print()` and `MakePdf()` call `this.asyncMakePdf(true).then(...)` inside a
+  `try` block but do not `await` it.
+- Their `finally` blocks run before the `then(...)` callback creates `blobUrl`.
+- Therefore the current `URL.revokeObjectURL(blobUrl)` cleanup is likely not
+  running for the generated PDF blob URLs.
+
+Recommended next work should happen in `/Users/keitaro/git/subkarte`, not in
+this library repository:
+
+1. Add/port the Safari or Simulator Safari RSS harness to exercise the actual
+   `PdfFormComponent.MakePdf()` / `Print()` flow.
+2. First fix the async structure so `asyncMakePdf()` is awaited and
+   `URL.revokeObjectURL()` definitely runs.
+3. Re-test. If WebKit RSS still grows, avoid `blob:` PDF viewer preview on
+   WebKit/iPadOS.
+4. Prefer WebKit-safe alternatives: direct download, server-backed HTTP PDF URL,
+   or a non-inline user-action flow.
+5. Also inspect other app-level `URL.createObjectURL(pdfBlob)` paths, especially
+   report PDF merge/preview code.
+
 ## Test Targets
 
 Main worktree:
