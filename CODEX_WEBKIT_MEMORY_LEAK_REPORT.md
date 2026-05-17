@@ -216,10 +216,70 @@ Local tool status on 2026-05-17:
 ```text
 safaridriver: available, Safari 26.5 (21624.2.5.11.4)
 WebdriverIO: installed for the Safari harness
-xcrun xctrace: not available in current developer path
-Safari Remote Automation: disabled locally at first run
+xcrun xctrace: available after Xcode installation
+Safari Remote Automation: enabled during later runs
 Safari harness: scripts/safari-pdf-viewer-cycle.mjs
+xctrace wrapper: scripts/xctrace-safari-pdf-cycle.mjs
 ```
+
+`xctrace` became available after Xcode installation:
+
+```text
+xctrace version 16.0 (17F42)
+Available templates include Allocations, Leaks, VM-adjacent Activity Monitor,
+System Trace, and Time Profiler.
+```
+
+Run the Safari cycle under `xctrace`:
+
+```sh
+XCTRACE_TEMPLATE='Activity Monitor' XCTRACE_MODE=all-processes ITERATIONS=5 DISPLAY_MS=2500 DISPOSE_MS=3000 npm run bench:safari-pdf-cycle:xctrace
+```
+
+Important limitation:
+
+- `Allocations` and `Leaks` are attach-style templates. Attaching to the normal
+  Safari app process failed because the target is SIP-restricted:
+  `Target process is marked restricted and cannot be traced while System
+  Integrity Protection is enabled`.
+- Without disabling SIP, use all-process templates such as `Activity Monitor`
+  or `System Trace` for trace capture.
+- For detailed `Allocations`, use a non-restricted target such as a custom
+  WebKit/Safari Technology Preview setup, or run on a machine configured
+  explicitly for Instruments attach.
+
+The wrapper saves `.trace` files under:
+
+```text
+tmp/xctrace/
+```
+
+Inspect a trace table of contents:
+
+```sh
+xcrun xctrace export --input tmp/xctrace/<trace-name>.trace --toc
+```
+
+First `xctrace` Activity Monitor run:
+
+```text
+trace: tmp/xctrace/safari-pdf-cycle-activity-monitor-2026-05-17T02-23-29-858Z.trace
+template: Activity Monitor
+mode: all-processes
+duration: 40.626492 seconds
+end reason: Time limit reached
+```
+
+RSS result during that trace:
+
+| Phase | RSS | Delta | Object URLs | Iframes |
+| ----- | --: | ----: | ----------- | ------: |
+| before | 1262.8 MB | 0.0 MB | 0 created / 0 revoked / 0 active | 0 |
+| after dispose 1 | 1330.2 MB | 67.3 MB | 1 created / 1 revoked / 0 active | 0 |
+| after dispose 2 | 1337.6 MB | 74.8 MB | 2 created / 2 revoked / 0 active | 0 |
+| after dispose 3 | 1341.9 MB | 79.0 MB | 3 created / 3 revoked / 0 active | 0 |
+| after dispose 4 | 1345.7 MB | 82.8 MB | 4 created / 4 revoked / 0 active | 0 |
+| after dispose 5 | 1352.9 MB | 90.1 MB | 5 created / 5 revoked / 0 active | 0 |
 
 Run the Safari harness:
 

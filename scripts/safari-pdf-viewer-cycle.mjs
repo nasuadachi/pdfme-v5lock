@@ -17,6 +17,7 @@ const iterations = Number(process.env.ITERATIONS || 5);
 const displayMs = Number(process.env.DISPLAY_MS || 2500);
 const disposeMs = Number(process.env.DISPOSE_MS || 3000);
 const safaridriverPort = Number(process.env.SAFARIDRIVER_PORT || 4444);
+const waitBeforeCycleMs = Number(process.env.WAIT_BEFORE_CYCLE_MS || 0);
 
 const html = `<!DOCTYPE html>
 <html>
@@ -267,6 +268,10 @@ try {
   const firstRssBytes = before.rssBytes;
   before.rssDeltaBytes = 0;
   printSample(before);
+  if (waitBeforeCycleMs > 0) {
+    console.log(`waiting-before-cycle ${waitBeforeCycleMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, waitBeforeCycleMs));
+  }
 
   for (let idx = 1; idx <= iterations; idx += 1) {
     await browser.executeAsync(
