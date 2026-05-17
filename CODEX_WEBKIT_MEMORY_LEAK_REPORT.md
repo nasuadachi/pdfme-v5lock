@@ -156,6 +156,78 @@ RSS result during that trace:
 | after dispose 4 | 1345.7 MB | 82.8 MB | 4 created / 4 revoked / 0 active | 0 |
 | after dispose 5 | 1352.9 MB | 90.1 MB | 5 created / 5 revoked / 0 active | 0 |
 
+## Simulator Safari Check
+
+Because macOS Safari `Allocations`/`Leaks` attach hits SIP restrictions, the
+next idea was to use iOS Simulator Safari with `simctl` and `leaks`.
+
+Booted device used:
+
+```text
+iOS 18.4
+iPad Pro 11-inch (M4)
+UDID: E0430610-1424-4517-962B-2A9302E6350E
+```
+
+Conceptual target flow:
+
+```sh
+xcrun simctl openurl booted "http://127.0.0.1:<port>/"
+xcrun simctl spawn booted leaks <pid> --outputGraph=before.memgraph
+# run repeated PDF display/dispose cycle
+xcrun simctl spawn booted leaks <pid> --diffFrom=before.memgraph
+```
+
+Actual test:
+
+- Served an auto-running local page.
+- Opened it in Simulator Safari via `xcrun simctl openurl booted`.
+- The page repeatedly fetched `playground/test-3page.pdf`, created a PDF blob
+  URL, displayed it in an iframe, cleared the iframe, and revoked the URL.
+- The page reported each phase back to the local server.
+- The harness sampled host-side Simulator MobileSafari/WebContent/Networking/GPU
+  RSS with `ps`.
+
+Result after 5 cycles:
+
+| Phase | RSS | Object URLs | Iframes |
+| ----- | --: | ----------- | ------: |
+| ready | 748.0 MB | 0 created / 0 revoked / 0 active | 0 |
+| after dispose 1 | 957.6 MB | 1 created / 1 revoked / 0 active | 0 |
+| after dispose 2 | 984.0 MB | 2 created / 2 revoked / 0 active | 0 |
+| after dispose 3 | 1011.7 MB | 3 created / 3 revoked / 0 active | 0 |
+| after dispose 4 | 1021.4 MB | 4 created / 4 revoked / 0 active | 0 |
+| after dispose 5 | 1023.0 MB | 5 created / 5 revoked / 0 active | 0 |
+
+```text
+delta-ready-to-complete: +275.1 MB
+```
+
+Interpretation:
+
+Simulator Safari can detect the leak signal very clearly with RSS. This is a
+good candidate for automated regression comparison after preview architecture
+changes.
+
+`leaks`/memgraph status:
+
+- Host-side `leaks --outputGraph ... <WebContent PID>` failed:
+  `Failed to get DYLD info for task from parent ... (os/kern) failure (5)`.
+- Simulator-side `xcrun simctl spawn booted leaks ... <WebContent PID>` failed:
+  `leaks cannot examine process ... try running with sudo` and
+  `mach port for process 0 not valid`.
+- `xcrun simctl spawn booted /usr/bin/pgrep` was unreliable in this environment
+  (`sysmond service not found`), but `xcrun simctl spawn booted /bin/ps -A`
+  could list the relevant processes.
+
+Current conclusion:
+
+- Simulator Safari + RSS is useful now.
+- `leaks --outputGraph` / `--diffFrom` is not currently usable against Simulator
+  Safari/WebContent without additional permissions or a different attach target.
+- Continue using RSS for fast automated comparisons; revisit memgraph only if a
+  reliable process attach path is found.
+
 Run the Safari harness:
 
 ```sh
