@@ -215,9 +215,49 @@ Local tool status on 2026-05-17:
 
 ```text
 safaridriver: available, Safari 26.5 (21624.2.5.11.4)
-WebdriverIO: not installed in this repo yet
+WebdriverIO: installed for the Safari harness
 xcrun xctrace: not available in current developer path
+Safari Remote Automation: disabled locally at first run
+Safari harness: scripts/safari-pdf-viewer-cycle.mjs
 ```
+
+Run the Safari harness:
+
+```sh
+ITERATIONS=5 DISPLAY_MS=2500 DISPOSE_MS=3000 npm run bench:safari-pdf-cycle
+```
+
+First real Safari result:
+
+| Phase | RSS | Delta | Object URLs | Iframes |
+| ----- | --: | ----: | ----------- | ------: |
+| before | 1226.7 MB | 0.0 MB | 0 created / 0 revoked / 0 active | 0 |
+| after show 1 | 1327.3 MB | 100.6 MB | 1 created / 0 revoked / 1 active | 1 |
+| after dispose 1 | 1296.3 MB | 69.5 MB | 1 created / 1 revoked / 0 active | 0 |
+| after show 2 | 1351.2 MB | 124.5 MB | 2 created / 1 revoked / 1 active | 1 |
+| after dispose 2 | 1305.1 MB | 78.4 MB | 2 created / 2 revoked / 0 active | 0 |
+| after show 3 | 1358.6 MB | 131.9 MB | 3 created / 2 revoked / 1 active | 1 |
+| after dispose 3 | 1312.2 MB | 85.5 MB | 3 created / 3 revoked / 0 active | 0 |
+| after show 4 | 1364.0 MB | 137.3 MB | 4 created / 3 revoked / 1 active | 1 |
+| after dispose 4 | 1317.8 MB | 91.1 MB | 4 created / 4 revoked / 0 active | 0 |
+| after show 5 | 1371.2 MB | 144.5 MB | 5 created / 4 revoked / 1 active | 1 |
+| after dispose 5 | 1323.7 MB | 97.0 MB | 5 created / 5 revoked / 0 active | 0 |
+
+Interpretation:
+
+Real Safari shows the same retention shape as Playwright WebKit, and the signal
+is stronger: after five display/dispose cycles, RSS remains about 97 MB above
+the pre-cycle baseline even though all object URLs are revoked and all iframes
+are removed.
+
+If Safari refuses the session, enable remote automation:
+
+```text
+Safari Settings > Advanced > Show features for web developers
+Develop > Allow Remote Automation
+```
+
+Alternatively, run `safaridriver --enable` with admin privileges.
 
 ## Why v5lock Disposal Did Not Fix the Real Crash
 

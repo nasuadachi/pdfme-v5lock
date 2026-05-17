@@ -52,6 +52,7 @@
     "build:manipulator": "npm run -w packages/manipulator build",
     "build:ui": "npm run -w packages/ui build",
     "pack:local": "mkdir -p ${PACK_DEST:-./dist-tarballs/pdfme} && npm pack --workspace @pdfme/common --workspace @pdfme/converter --workspace @pdfme/generator --workspace @pdfme/schemas --workspace @pdfme/ui --pack-destination ${PACK_DEST:-./dist-tarballs/pdfme}",
+    "bench:safari-pdf-cycle": "node scripts/safari-pdf-viewer-cycle.mjs",
     "test": "npm run test --workspaces",
     "test:ui:update-snapshots": "npm run -w packages/ui test -- -u",
     "lint": "npm run lint --workspaces",
@@ -78,6 +79,7 @@
     "ts-jest-resolver": "^2.0.1",
     "ts-loader": "^9.5.4",
     "ts-prune": "^0.10.3",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "webdriverio": "^9.27.1"
   }
 }
