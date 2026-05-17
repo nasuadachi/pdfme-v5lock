@@ -42,6 +42,7 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
   const [pageSizes, setPageSizes] = useState<Size[]>([]);
   const [scale, setScale] = useState(0);
   const [error, setError] = useState<Error | null>(null);
+  const initSeqRef = useRef(0);
 
   const init = async (prop: { template: Template; size: Size }) => {
     const {
@@ -94,16 +95,29 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
   };
 
   useEffect(() => {
+    const initSeq = initSeqRef.current + 1;
+    initSeqRef.current = initSeq;
+    setBackgrounds([]);
+    setError(null);
+
     init({ template, size })
       .then(({ pageSizes, scale, backgrounds }) => {
+        if (initSeqRef.current !== initSeq) return;
         setPageSizes(pageSizes);
         setScale(scale);
         setBackgrounds(backgrounds);
       })
       .catch((err: Error) => {
+        if (initSeqRef.current !== initSeq) return;
         setError(err);
         console.error('[@pdfme/ui]', err);
       });
+
+    return () => {
+      if (initSeqRef.current === initSeq) {
+        initSeqRef.current += 1;
+      }
+    };
   }, [template, size]);
 
   return {
@@ -111,12 +125,18 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     pageSizes,
     scale: scale * zoomLevel,
     error,
-    refresh: (template: Template) =>
-      init({ template, size }).then(({ pageSizes, scale, backgrounds }) => {
+    refresh: (template: Template) => {
+      const initSeq = initSeqRef.current + 1;
+      initSeqRef.current = initSeq;
+      setError(null);
+
+      return init({ template, size }).then(({ pageSizes, scale, backgrounds }) => {
+        if (initSeqRef.current !== initSeq) return;
         setPageSizes(pageSizes);
         setScale(scale);
         setBackgrounds(backgrounds);
-      }),
+      });
+    },
   };
 };
 

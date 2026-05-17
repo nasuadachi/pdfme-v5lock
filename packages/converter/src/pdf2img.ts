@@ -7,7 +7,7 @@ interface Environment {
   canvasToArrayBuffer: (
     canvas: HTMLCanvasElement | OffscreenCanvas,
     imageType: ImageType,
-  ) => ArrayBuffer;
+  ) => ArrayBuffer | Promise<ArrayBuffer>;
 }
 
 export interface Pdf2ImgOptions {
@@ -42,10 +42,11 @@ export async function pdf2img(
 
       for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
         const page = await pdfDoc.getPage(pageNum);
+        let canvas: HTMLCanvasElement | OffscreenCanvas | undefined;
         try {
           const viewport = page.getViewport({ scale });
 
-          const canvas = createCanvas(viewport.width, viewport.height);
+          canvas = createCanvas(viewport.width, viewport.height);
           if (!canvas) {
             throw new Error('Failed to create canvas');
           }
@@ -56,10 +57,14 @@ export async function pdf2img(
           }
 
           await page.render({ canvasContext: context, viewport }).promise;
-          const arrayBuffer = canvasToArrayBuffer(canvas, imageType);
+          const arrayBuffer = await canvasToArrayBuffer(canvas, imageType);
           results.push(arrayBuffer);
         } finally {
           page.cleanup();
+          if (canvas) {
+            canvas.width = 0;
+            canvas.height = 0;
+          }
         }
       }
 

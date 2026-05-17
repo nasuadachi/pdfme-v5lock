@@ -23,7 +23,7 @@ export const getFontsData = (): Font => ({
   NotoSansJP: {
     fallback: false,
     data: 'https://fonts.gstatic.com/s/notosansjp/v53/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw-oME.ttf',
-  }
+  },
 });
 
 export const readFile = (file: File | null, type: 'text' | 'dataURL' | 'arrayBuffer') => {
@@ -68,9 +68,64 @@ export const downloadJsonFile = (json: unknown, title: string) => {
   }
 };
 
+const isLikelySafari = () => {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /Safari/.test(navigator.userAgent) &&
+    !/CriOS|FxiOS|EdgiOS|OPiOS|Chrome/.test(navigator.userAgent)
+  );
+};
+
+const isLikelyIOS = () => {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+};
+
+const scheduleRevokeObjectURL = (url: string) => {
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+};
+
+const downloadPdfUrl = (url: string, fileName: string) => {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const arrayBuffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(arrayBuffer).set(bytes);
+  return arrayBuffer;
+};
+
+const openPdfBytes = (pdf: Uint8Array, fileName = 'pdfme.pdf') => {
+  const blob = new Blob([toArrayBuffer(pdf)], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  if (isLikelySafari() || isLikelyIOS()) {
+    downloadPdfUrl(url, fileName);
+    scheduleRevokeObjectURL(url);
+    return;
+  }
+
+  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer');
+  if (openedWindow) {
+    openedWindow.opener = null;
+  } else {
+    downloadPdfUrl(url, fileName);
+  }
+  scheduleRevokeObjectURL(url);
+};
+
 export const handleLoadTemplate = (
   e: React.ChangeEvent<HTMLInputElement>,
-  currentRef: Designer | Form | Viewer | null
+  currentRef: Designer | Form | Viewer | null,
 ) => {
   if (e.target && e.target.files && e.target.files[0]) {
     getTemplateFromJsonFile(e.target.files[0])
@@ -122,8 +177,7 @@ export const generatePDF = async (currentRef: Designer | Form | Viewer | null) =
       plugins: getPlugins(),
     });
 
-    const blob = new Blob([pdf.buffer], { type: 'application/pdf' });
-    window.open(URL.createObjectURL(blob));
+    openPdfBytes(pdf);
   } catch (e) {
     alert(e + '\n\nCheck the console for full stack trace');
     throw e;
@@ -147,11 +201,11 @@ export const getBlankTemplate = () =>
       height: 297,
       padding: [20, 10, 20, 10],
     },
-  } as Template);
+  }) as Template;
 
 export const getTemplateById = async (templateId: string): Promise<Template> => {
   const template = await fetch(`/template-assets/${templateId}/template.json`).then((res) =>
-    res.json()
+    res.json(),
   );
   checkTemplate(template);
   return template as Template;
