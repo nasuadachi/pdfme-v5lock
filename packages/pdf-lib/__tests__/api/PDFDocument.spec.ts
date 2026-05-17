@@ -568,6 +568,7 @@ describe(`PDFDocument`, () => {
       expect(getEmbedder(javaScript)).toBeDefined();
 
       pdfDoc.dispose();
+      expect(() => pdfDoc.dispose()).not.toThrow();
 
       expect(getEmbedder(image)).toBeUndefined();
       expect(getEmbedder(embeddedPage)).toBeUndefined();

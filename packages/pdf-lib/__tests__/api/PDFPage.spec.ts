@@ -1,7 +1,21 @@
 import fs from 'fs';
-import { PDFArray, PDFDocument, PDFName, StandardFonts } from '../../src/index';
+import {
+  PDFArray,
+  PDFContentStream,
+  PDFDocument,
+  PDFName,
+  StandardFonts,
+} from '../../src/index';
 
 const birdPng = fs.readFileSync('assets/images/greyscale_bird.png');
+const visibleBasicShapesSvg = [
+  '<svg viewBox="0 0 320 220" width="320" height="220">',
+  '<rect x="0" y="0" width="320" height="220" fill="#f7f7f7"/>',
+  '<circle cx="78" cy="70" r="42" fill="#e63946" stroke="#111111" stroke-width="4"/>',
+  '<line x1="158" y1="35" x2="292" y2="112" stroke="#1d4ed8" stroke-width="10" stroke-linecap="round"/>',
+  '<path d="M 38 160 C 82 72 126 72 170 160 S 258 210 302 130" fill="none" stroke="#9333ea" stroke-width="7" stroke-linecap="round"/>',
+  '</svg>',
+].join('');
 
 describe(`PDFDocument`, () => {
   describe(`getSize() method`, () => {
@@ -147,5 +161,79 @@ describe(`PDFDocument`, () => {
     const key2 = page2.node.normalizedEntries().Font.keys()[1];
     expect(key1).not.toEqual(key2);
     expect(page2.node.normalizedEntries().Font.keys()).toEqual([key1, key2]);
+  });
+
+  it(`drawSvg() adds SVG path operators to the page content stream`, async () => {
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([200, 200]);
+
+    await page.drawSvg(
+      '<svg viewBox="0 0 10 10"><path d="M 0 0 L 10 0 L 10 10 Z" /></svg>',
+      { x: 12, y: 34 },
+    );
+
+    const contents = page.node.Contents();
+
+    expect(contents).toBeInstanceOf(PDFArray);
+
+    const svgContentStream = Array.from({ length: contents.size() }, (_, index) =>
+      pdfDoc.context.lookup(contents.get(index), PDFContentStream),
+    ).find((content) => content.getContentsString().includes('0 0 m'));
+
+    expect(svgContentStream).toBeDefined();
+    expect(svgContentStream!.getContentsString()).toContain('12 34 cm');
+    expect(svgContentStream!.getContentsString()).toContain('0 0 m');
+    expect(svgContentStream!.getContentsString()).toContain('10 0 l');
+    expect(svgContentStream!.getContentsString()).toContain('10 10 l');
+  });
+
+  it(`drawSvg() can render text with an injected font`, async () => {
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([200, 200]);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    await page.drawSvg(
+      '<svg viewBox="0 0 100 20"><text x="0" y="12" font-family="CustomFamily">Hello</text></svg>',
+      { fonts: { CustomFamily: font } },
+    );
+
+    const contents = page.node.Contents();
+
+    expect(contents).toBeInstanceOf(PDFArray);
+
+    const fontDict = page.node.normalizedEntries().Font;
+    expect(fontDict.keys().length).toBe(1);
+    expect(fontDict.get(fontDict.keys()[0])).toBe(font.ref);
+
+    const textContentStream = Array.from({ length: contents.size() }, (_, index) =>
+      pdfDoc.context.lookup(contents.get(index), PDFContentStream),
+    ).find((content) => content.getContentsString().includes('Tj'));
+
+    expect(textContentStream).toBeDefined();
+    expect(textContentStream!.getContentsString()).toContain('Tj');
+  });
+
+  it(`drawSvg() renders visible circle, line, and freeform path shapes`, async () => {
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([320, 220]);
+
+    await page.drawSvg(visibleBasicShapesSvg, { x: 0, y: 220, width: 320, height: 220 });
+
+    const contents = page.node.Contents();
+
+    expect(contents).toBeInstanceOf(PDFArray);
+
+    const contentText = Array.from({ length: contents.size() }, (_, index) =>
+      pdfDoc.context
+        .lookup(contents.get(index), PDFContentStream)
+        .getContentsString(),
+    ).join('\n');
+
+    expect(contentText).toContain('1 0 0 1 0 220 cm');
+    expect(contentText).toContain('158 -35 m');
+    expect(contentText).toContain('292 -112 l');
+    expect(contentText).toContain('1 0 0 -1 0 220 cm');
+    expect(contentText).toContain('38 160 m');
+    expect(contentText).toContain('82 72 126 72 170 160 c');
   });
 });
