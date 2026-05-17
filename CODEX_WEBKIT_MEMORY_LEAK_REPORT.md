@@ -41,146 +41,21 @@ Comparison worktree was created with:
 git worktree add /Users/keitaro/git/pdfme-v5lock-before-v5lock1 d6024a04
 ```
 
-## Harness
+## Playwright WebKit Screening
 
-Temporary harness used for this investigation:
+Playwright WebKit was used only as an early, low-cost screening tool. It showed
+that the pdf-lib disposal changes did not materially change repeated generation
+or blob iframe preview RSS, and it helped shape the next tests.
 
-```text
-/Users/keitaro/tmp/pdfme-worktree-webkit-bench.js
-```
+Do not treat the Playwright numbers as decision-grade Safari evidence:
 
-Temporary browser bundles used by the harness:
+- It uses Playwright's bundled WebKit, not real Safari.
+- Its process/RSS shape differs from Safari and iPadOS Safari.
+- It does not expose Safari Web Inspector's `page` memory category.
 
-```text
-/Users/keitaro/tmp/pdfme-pdf-lib-before-v5lock1.mjs
-/Users/keitaro/tmp/pdfme-pdf-lib-current-v5lock2.mjs
-```
-
-Latest result files:
-
-```text
-/Users/keitaro/tmp/pdfme-webkit-bench-results/latest-summary.csv
-/Users/keitaro/tmp/pdfme-webkit-bench-results/latest.json
-```
-
-The harness uses Playwright WebKit and samples the WebKit process tree RSS with
-`ps`. This is not the same metric as Safari Web Inspector's `page` category, but
-it is useful for local A/B screening.
-
-## 5 Iteration Result
-
-Command:
-
-```sh
-node /Users/keitaro/tmp/pdfme-worktree-webkit-bench.js
-```
-
-Environment defaults:
-
-```text
-ITERATIONS=5
-SAMPLE_MS=500
-COOLDOWN_MS=2000
-```
-
-Result summary:
-
-| Scenario            | before-v5lock1 max delta | current-v5lock2 max delta | Result               |
-| ------------------- | -----------------------: | ------------------------: | -------------------- |
-| `text-only`         |                   6.1 MB |                    6.1 MB | no meaningful change |
-| `image-heavy`       |                   5.9 MB |                    6.0 MB | no meaningful change |
-| `image-blob-iframe` |                   6.2 MB |                    6.0 MB | no meaningful change |
-
-Interpretation:
-
-At 5 iterations, the noise floor is too high to claim improvement. The blob
-iframe path was already slightly higher than generation-only, but not enough to
-explain real Safari crashes.
-
-## 30 Iteration Result
-
-Command:
-
-```sh
-ITERATIONS=30 SAMPLE_MS=1000 COOLDOWN_MS=5000 node /Users/keitaro/tmp/pdfme-worktree-webkit-bench.js
-```
-
-Result summary:
-
-| Scenario                 | before-v5lock1 max / last delta | current-v5lock2 max / last delta | Object URLs                      | Result               |
-| ------------------------ | ------------------------------: | -------------------------------: | -------------------------------- | -------------------- |
-| `text-only`              |                    6.0 / 5.8 MB |                     6.2 / 6.0 MB | 0 / 0 active                     | no meaningful change |
-| `image-heavy`            |                    5.9 / 5.8 MB |                     6.1 / 6.0 MB | 0 / 0 active                     | no meaningful change |
-| `retained-image-wrapper` |                    5.8 / 5.8 MB |                     5.8 / 5.6 MB | 0 / 0 active                     | no meaningful change |
-| `image-blob-iframe`      |                  15.3 / 15.1 MB |                   15.4 / 15.3 MB | 30 created, 30 revoked, 0 active | no meaningful change |
-
-Interpretation:
-
-- PDF generation alone stays near 6 MB RSS growth in both versions.
-- Image-heavy generation alone also stays near 6 MB in both versions.
-- Keeping image wrapper references did not amplify a visible difference in this
-  WebKit harness.
-- Blob iframe preview grows to about 15 MB in both versions.
-- The active object URL count returns to zero, so this is not a simple missing
-  `revokeObjectURL()` leak.
-
-## Real PDF Viewer Cycle Result
-
-Test PDF:
-
-```text
-/Users/keitaro/git/pdfme-v5lock/playground/test-3page.pdf
-size: 427 KB
-PDF version: 1.7
-```
-
-Temporary harness:
-
-```text
-/Users/keitaro/tmp/pdfme-test-3page-pdf-viewer-cycle.js
-```
-
-The harness uses one Playwright WebKit tab. Each cycle:
-
-1. Fetch `test-3page.pdf`.
-2. Create `Blob([arrayBuffer], { type: 'application/pdf' })`.
-3. Create an object URL.
-4. Display it in an iframe in the same tab.
-5. Dispose by clearing the iframe, removing it, and calling
-   `URL.revokeObjectURL(url)`.
-6. Wait and sample WebKit/Playwright process RSS.
-
-Command:
-
-```sh
-ITERATIONS=5 DISPLAY_MS=1500 DISPOSE_MS=10000 node /Users/keitaro/tmp/pdfme-test-3page-pdf-viewer-cycle.js
-```
-
-Result:
-
-| Phase | RSS | Delta | Object URLs | Iframes |
-| ----- | --: | ----: | ----------- | ------: |
-| before | 309.0 MB | 0.0 MB | 0 created / 0 revoked / 0 active | 0 |
-| after cooldown 1 | 349.4 MB | 40.4 MB | 1 created / 1 revoked / 0 active | 0 |
-| after cooldown 2 | 352.2 MB | 43.2 MB | 2 created / 2 revoked / 0 active | 0 |
-| after cooldown 3 | 354.3 MB | 45.3 MB | 3 created / 3 revoked / 0 active | 0 |
-| after cooldown 4 | 356.7 MB | 47.7 MB | 4 created / 4 revoked / 0 active | 0 |
-| after cooldown 5 | 359.2 MB | 50.2 MB | 5 created / 5 revoked / 0 active | 0 |
-
-Shorter dispose wait produced the same shape:
-
-```text
-ITERATIONS=5 DISPLAY_MS=2500 DISPOSE_MS=3000
-after cooldown 5: 358.5 MB RSS, +49.3 MB delta
-```
-
-Interpretation:
-
-This reproduces the real Safari/WebKit failure mode more directly than the
-generation-only tests. Even with no active object URLs and no iframe elements
-left in the document, WebKit RSS stays elevated and grows across repeated PDF
-viewer cycles. This strongly supports avoiding repeated blob PDF iframe/window
-preview on Safari/iPadOS.
+The useful takeaway was limited: a real Safari/iPadOS-oriented test is needed,
+and active object URL count returning to zero does not prove the PDF viewer
+resources were released.
 
 ## Safari Measurement Plan
 
@@ -380,37 +255,10 @@ Intent:
 - Avoid `basePdf -> base64 -> Uint8Array` conversion in the UI when `basePdf`
   is already an `ArrayBuffer` or `Uint8Array`.
 
-WebKit screening harness:
-
-```text
-/Users/keitaro/tmp/pdfme-background-memory-bench.js
-```
-
-Command:
-
-```sh
-ITERATIONS=200 SAMPLE_MS=1000 COOLDOWN_MS=8000 node /Users/keitaro/tmp/pdfme-background-memory-bench.js
-```
-
-Latest 200 iteration result:
-
-| Path | Max / last delta | Active object URLs | Result |
-| ---- | ---------------: | -----------------: | ------ |
-| old `toDataURL` + data URL background | 5.6 / 5.6 MB | 0 | baseline |
-| new `toBlob` + object URL background | 4.5 / 4.5 MB | 0 | about 1.1 MB lower |
-
-Earlier 200 iteration run showed a similar direction:
-
-| Path | Max / last delta | Active object URLs | Result |
-| ---- | ---------------: | -----------------: | ------ |
-| old `toDataURL` + data URL background | 5.8 / 5.8 MB | 0 | baseline |
-| new `toBlob` + object URL background | 5.0 / 5.0 MB | 0 | about 0.8 MB lower |
-
-Interpretation:
-
-This reduces browser-side peak/retained memory in the PDF-to-image background
-path, but the gain is modest. It does not address WebKit's larger PDF viewer
-retention problem from repeated PDF blob iframe/window preview.
+Playwright WebKit screening showed a small improvement in the background image
+path, but not enough to matter for the Safari PDF viewer crash. Keep the code
+change because it avoids unnecessary base64 strings, but do not spend more time
+on Playwright-only memory numbers.
 
 Known unrelated verification blockers:
 
@@ -439,29 +287,6 @@ Priorities:
    - Navigate to a separate PDF page instead of replacing the same iframe.
 4. Keep `URL.revokeObjectURL()` and `iframe.src = 'about:blank'`, but treat them
    as hygiene, not the primary fix.
-5. Re-run the 30 iteration WebKit harness after each preview architecture
-   change.
-6. Validate the final candidate with real iPadOS Safari Web Inspector timeline
-   recording, because Playwright WebKit RSS does not expose Safari's `page`
-   category.
-
-## Commands To Resume
-
-Rebuild temporary browser bundles:
-
-```sh
-./node_modules/.bin/esbuild /Users/keitaro/git/pdfme-v5lock-before-v5lock1/packages/pdf-lib/dist/esm/src/index.js --bundle --format=esm --platform=browser --outfile=/Users/keitaro/tmp/pdfme-pdf-lib-before-v5lock1.mjs
-./node_modules/.bin/esbuild /Users/keitaro/git/pdfme-v5lock/packages/pdf-lib/dist/esm/src/index.js --bundle --format=esm --platform=browser --outfile=/Users/keitaro/tmp/pdfme-pdf-lib-current-v5lock2.mjs
-```
-
-Run 30 iteration comparison:
-
-```sh
-ITERATIONS=30 SAMPLE_MS=1000 COOLDOWN_MS=5000 node /Users/keitaro/tmp/pdfme-worktree-webkit-bench.js
-```
-
-Check latest summary:
-
-```sh
-cat /Users/keitaro/tmp/pdfme-webkit-bench-results/latest-summary.csv
-```
+5. Re-run the real Safari harness after each preview architecture change.
+6. Use Simulator + `leaks`/memgraph if it can produce useful diffs without SIP
+   restrictions.
