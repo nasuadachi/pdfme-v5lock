@@ -1,6 +1,6 @@
 {
   "name": "@pdfme/converter",
-  "version": "5.5.11-v5lock.2",
+  "version": "5.5.11-v5lock.3",
   "sideEffects": false,
   "author": "hand-dot",
   "license": "MIT",
@@ -39,22 +39,22 @@
     "build:esm": "tsc -p tsconfig.esm.json",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts src --config eslint.config.mjs",
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "prune": "ts-prune src",
     "prettier": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {
     "@pdfme/common": "*",
     "@pdfme/pdf-lib": "*",
-    "pdfjs-dist": "^3.11.174"
+    "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {
     "@pdfme/generator": "*",
     "@types/estree": "^1.0.6",
-    "canvas": "^2.11.2"
+    "canvas": "^3.2.3"
   },
   "optionalDependencies": {
-    "canvas": "^2.11.0"
+    "canvas": "^3.2.3"
   },
   "jest": {
     "resolver": "ts-jest-resolver",

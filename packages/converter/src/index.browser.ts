@@ -1,10 +1,11 @@
-import * as pdfjsLib from 'pdfjs-dist';
-// @ts-expect-error - PDFJSWorker import is not properly typed but required for functionality
-import PDFJSWorker from 'pdfjs-dist/build/pdf.worker.entry.js';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJSWorker as unknown as string;
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
+  import.meta.url,
+).toString();
 const pdfJsDocumentOptions = {
   isEvalSupported: false,
   verbosity: pdfjsLib.VerbosityLevel.ERRORS,

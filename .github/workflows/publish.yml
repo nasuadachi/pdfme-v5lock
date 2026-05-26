@@ -12,7 +12,7 @@ jobs:
   publish-npm:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write  # Required for OIDC authentication
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.17.0'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Update npm (11.5.1+ required for OIDC)
@@ -50,7 +50,7 @@ jobs:
         run: npm ci
 
       - name: Set NPM version
-        run: npm version --no-git-tag-version $VERSION --workspaces
+        run: npm version --no-git-tag-version $VERSION --workspaces --include-workspace-root
 
       - name: Build
         run: npm run build
@@ -63,6 +63,23 @@ jobs:
       - name: Publish to NPM
         run: npm publish --workspaces --access public --tag $NPM_TAG
 
+      - name: Pack release tarballs
+        if: startsWith(github.ref, 'refs/tags/')
+        run: npm run pack:local
+
+      - name: Upload tarballs to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist-tarballs/pdfme/*.tgz --clobber
+          else
+            gh release create "$VERSION" dist-tarballs/pdfme/*.tgz \
+              --title "$VERSION" \
+              --notes "Release $VERSION"
+          fi
+
   playground-test:
     runs-on: ubuntu-latest
     steps:
@@ -72,7 +89,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22.17.0'
 
       - name: Install dependencies and build project
         run: |

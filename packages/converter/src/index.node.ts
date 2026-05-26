@@ -1,14 +1,31 @@
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
-// @ts-expect-error - PDFJSWorker import is not properly typed but required for functionality
-import PDFJSWorker from 'pdfjs-dist/legacy/build/pdf.worker.js';
 import { createCanvas } from 'canvas';
 import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJSWorker as unknown as string;
-const pdfJsDocumentOptions = {
-  isEvalSupported: false,
-  verbosity: pdfjsLib.VerbosityLevel.ERRORS,
+type PdfJsLib = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+const importPdfJs = new Function(
+  'specifier',
+  'return import(specifier)',
+) as (specifier: string) => Promise<PdfJsLib>;
+
+let pdfJsLibPromise: Promise<PdfJsLib> | undefined;
+
+const getPdfJsLib = async () => {
+  pdfJsLibPromise ??= importPdfJs('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfJsLibPromise;
+};
+
+const clonePdfData = (pdf: ArrayBuffer | Uint8Array) =>
+  pdf instanceof Uint8Array ? new Uint8Array(pdf) : new Uint8Array(pdf);
+
+const getDocument = async (pdf: ArrayBuffer | Uint8Array) => {
+  const pdfjsLib = await getPdfJsLib();
+  return pdfjsLib.getDocument({
+    data: clonePdfData(pdf),
+    isEvalSupported: false,
+    verbosity: pdfjsLib.VerbosityLevel.ERRORS,
+  }).promise;
 };
 
 export const pdf2img = async (
@@ -16,7 +33,7 @@ export const pdf2img = async (
   options: Pdf2ImgOptions = {},
 ): Promise<ArrayBuffer[]> =>
   _pdf2img(pdf, { ...options, imageType: options.imageType ?? 'png' }, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
+    getDocument,
     createCanvas: (width, height) => createCanvas(width, height) as unknown as HTMLCanvasElement,
     canvasToArrayBuffer: (canvas, imageType) => {
       // Using a more specific type for the canvas from the 'canvas' package
@@ -24,13 +41,15 @@ export const pdf2img = async (
       const buffer =
         imageType === 'png' ? nodeCanvas.toBuffer('image/png') : nodeCanvas.toBuffer('image/jpeg');
       // Convert to ArrayBuffer
-      return new Uint8Array(buffer).buffer;
+      const arrayBuffer = new ArrayBuffer(buffer.byteLength);
+      new Uint8Array(arrayBuffer).set(buffer);
+      return arrayBuffer;
     },
   });
 
 export const pdf2size = async (pdf: ArrayBuffer | Uint8Array, options: Pdf2SizeOptions = {}) =>
   _pdf2size(pdf, options, {
-    getDocument: (pdf) => pdfjsLib.getDocument({ data: pdf, ...pdfJsDocumentOptions }).promise,
+    getDocument,
   });
 
 export { img2pdf } from './img2pdf.js';

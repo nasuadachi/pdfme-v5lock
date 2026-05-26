@@ -3,7 +3,9 @@
   "compilerOptions": {
     "module": "CommonJS",
     "moduleResolution": "node",
+    "rootDir": ".",
     "outDir": "./dist/node",
     "skipLibCheck": true
-  }
+  },
+  "include": ["src/**/*.ts"]
 }
