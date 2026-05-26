@@ -35,6 +35,10 @@ vendor/pdfme/pdfme-schemas-5.5.11-v5lock.2.tgz
 vendor/pdfme/pdfme-ui-5.5.11-v5lock.2.tgz
 ```
 
+These `v5lock.2` tarballs remain committed for compatibility with existing
+references. Starting with `5.5.11-v5lock.3`, v5lock tarballs are distributed as
+GitHub Release assets instead of committed files.
+
 Important finding in `subkarte`:
 
 ```text

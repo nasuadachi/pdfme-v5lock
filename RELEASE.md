@@ -20,3 +20,9 @@ Releases to the `dev` tag follow the following naming scheme:
 
 - `x.y.z-dev.n`, where `x.y.z` is the version of the last stable release and `n` is the number of commits since the last stable release.
 - `x.y.z-[rc|beta|alpha].n-dev.m`, where `x.y.z-[rc|beta|alpha].n` is the version of the last pre-release and `m` is the number of commits since the last pre-release.
+
+## v5lock tarballs
+
+The historical `v5lock.2` tarballs remain committed under `dist-tarballs/` because downstream projects still reference them.
+
+Starting with `5.5.11-v5lock.3`, v5lock tarballs are provided as GitHub Release assets instead of being committed to this repository. Use the assets attached to the matching GitHub Release tag, such as `5.5.11-v5lock.3`.
