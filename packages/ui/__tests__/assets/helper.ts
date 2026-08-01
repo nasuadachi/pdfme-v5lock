@@ -1,6 +1,6 @@
 import * as hooks from '../../src/hooks';
 import { uuid } from '../../src/helper';
-import { BLANK_PDF, Template } from '@pdfme/common';
+import { BLANK_A4_PDF, Template } from '@pdfme/common';
 
 export const setupUIMock = () => {
   const backgrounds = ['data:image/png;base64,a...'];
@@ -25,7 +25,7 @@ export const setupUIMock = () => {
 };
 
 export const getSampleTemplate = (): Template => ({
-  basePdf: BLANK_PDF,
+  basePdf: BLANK_A4_PDF,
   schemas: [
     [
       {

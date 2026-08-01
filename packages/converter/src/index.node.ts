@@ -1,23 +1,17 @@
-import { createCanvas } from 'canvas';
+import { Canvas, createCanvas } from '@napi-rs/canvas';
 import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
-
-type PdfJsLib = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
-
-const importPdfJs = new Function(
-  'specifier',
-  'return import(specifier)',
-) as (specifier: string) => Promise<PdfJsLib>;
+import { loadPdfJs, type PdfJsLib } from './pdfjs.node.js';
 
 let pdfJsLibPromise: Promise<PdfJsLib> | undefined;
 
-const getPdfJsLib = async () => {
-  pdfJsLibPromise ??= importPdfJs('pdfjs-dist/legacy/build/pdf.mjs');
+const getPdfJsLib = () => {
+  pdfJsLibPromise ??= loadPdfJs();
   return pdfJsLibPromise;
 };
 
 const clonePdfData = (pdf: ArrayBuffer | Uint8Array) =>
-  pdf instanceof Uint8Array ? new Uint8Array(pdf) : new Uint8Array(pdf);
+  new Uint8Array(pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf));
 
 const getDocument = async (pdf: ArrayBuffer | Uint8Array) => {
   const pdfjsLib = await getPdfJsLib();
@@ -36,8 +30,7 @@ export const pdf2img = async (
     getDocument,
     createCanvas: (width, height) => createCanvas(width, height) as unknown as HTMLCanvasElement,
     canvasToArrayBuffer: (canvas, imageType) => {
-      // Using a more specific type for the canvas from the 'canvas' package
-      const nodeCanvas = canvas as unknown as import('canvas').Canvas;
+      const nodeCanvas = canvas as unknown as Canvas;
       const buffer =
         imageType === 'png' ? nodeCanvas.toBuffer('image/png') : nodeCanvas.toBuffer('image/jpeg');
       // Convert to ArrayBuffer

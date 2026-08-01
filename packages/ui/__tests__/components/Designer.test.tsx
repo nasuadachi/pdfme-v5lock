@@ -14,9 +14,9 @@ import { i18n } from '../../src/i18n';
 import { SELECTABLE_CLASSNAME } from '../../src/constants';
 import { getDefaultFont, pluginRegistry } from '@pdfme/common';
 import { setupUIMock, getSampleTemplate } from '../assets/helper';
-import { text, image } from "@pdfme/schemas"
+import { text, image } from '@pdfme/schemas';
 
-const plugins = { text, image, }
+const plugins = { text, image };
 
 test('Designer snapshot', async () => {
   setupUIMock();
@@ -37,11 +37,13 @@ test('Designer snapshot', async () => {
             />
           </PluginsRegistry.Provider>
         </FontContext.Provider>
-      </I18nContext.Provider>
+      </I18nContext.Provider>,
     );
     container = c;
   });
 
-  await waitFor(() => Boolean(container?.getElementsByClassName(SELECTABLE_CLASSNAME)));
+  await waitFor(() =>
+    expect(container.getElementsByClassName(SELECTABLE_CLASSNAME)).toHaveLength(2),
+  );
   expect(container.firstChild).toMatchSnapshot();
 });

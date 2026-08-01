@@ -35,7 +35,9 @@ test('Preview(as Viewer) snapshot', async () => {
     container = c;
   });
 
-  await waitFor(() => Boolean(container?.getElementsByClassName(SELECTABLE_CLASSNAME)));
+  await waitFor(() =>
+    expect(container.getElementsByClassName(SELECTABLE_CLASSNAME)).toHaveLength(2),
+  );
   expect(container.firstChild).toMatchSnapshot();
 });
 
@@ -60,6 +62,8 @@ test('Preview(as Form) snapshot', async () => {
     container = c;
   });
 
-  await waitFor(() => Boolean(container?.getElementsByClassName(SELECTABLE_CLASSNAME)));
+  await waitFor(() =>
+    expect(container.getElementsByClassName(SELECTABLE_CLASSNAME)).toHaveLength(2),
+  );
   expect(container.firstChild).toMatchSnapshot();
 });

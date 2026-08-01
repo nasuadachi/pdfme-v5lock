@@ -308,7 +308,8 @@ export const template2SchemasList = async (_template: Template) => {
       height: basePdf.height,
     }));
   } else {
-    pageSizes = await pdf2size(await basePdfToArrayBuffer(basePdf));
+    const pdfArrayBuffer = await basePdfToArrayBuffer(basePdf);
+    pageSizes = await pdf2size(new Uint8Array(pdfArrayBuffer));
   }
 
   const ssl = schemasForUI.length;

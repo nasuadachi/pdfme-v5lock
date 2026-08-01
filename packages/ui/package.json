@@ -31,7 +31,7 @@
     "build": "vite build && tsc --emitDeclarationOnly",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts,.tsx src --config eslint.config.mjs",
-    "test": "jest",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "prune": "ts-prune src",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'"
   },
@@ -90,6 +90,7 @@
       "./__tests__/test-helpers.js"
     ],
     "moduleNameMapper": {
+      "^\\./pdfjs\\.node\\.js$": "<rootDir>/../../scripts/jest-pdfjs-loader.cjs",
       "\\.(png|css)$": "<rootDir>/__mocks__/assetsTransformer.js",
       "^@pdfme/converter$": "<rootDir>/../converter/src/index.node.ts",
       "^@pdfme/schemas/utils$": "<rootDir>/../schemas/src/utils.ts",

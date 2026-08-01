@@ -1,6 +1,9 @@
-import { PDFDocument } from '@pdfme/pdf-lib';
+import * as PDFLib from '@pdfme/pdf-lib';
 import { mm2pt } from '@pdfme/common';
 import type { ImageType } from './types.js';
+
+const pdfLibDefault = Reflect.get(PDFLib, 'default') as unknown as typeof PDFLib | undefined;
+const PDFDocument = pdfLibDefault?.PDFDocument ?? PDFLib.PDFDocument;
 
 interface Img2PdfOptions {
   scale?: number;
@@ -41,7 +44,7 @@ export async function img2pdf(
   imgs: ArrayBuffer[],
   options: Img2PdfOptions = {},
 ): Promise<ArrayBuffer> {
-  let doc: PDFDocument | undefined;
+  let doc: PDFLib.PDFDocument | undefined;
 
   try {
     const { scale = 1, size, margin = [0, 0, 0, 0] } = options;

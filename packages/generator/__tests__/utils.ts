@@ -20,6 +20,9 @@ const GreatVibesRegularData = readFileSync(
 const JuliusSansOneRegularData = readFileSync(
   path.join(__dirname, `/assets/fonts/JuliusSansOne-Regular.ttf`),
 );
+const PinyonScriptRegularData = readFileSync(
+  path.join(__dirname, `/assets/fonts/PinyonScript-Regular.ttf`),
+);
 
 export const getFont = (): Font => ({
   ...getDefaultFont(),
@@ -32,7 +35,7 @@ export const getFont = (): Font => ({
   NotoSansJP: { data: NotoSansJPRegularData },
   'PinyonScript-Regular': {
     fallback: false,
-    data: 'https://fonts.gstatic.com/s/pinyonscript/v22/6xKpdSJbL9-e9LuoeQiDRQR8aOLQO4bhiDY.ttf',
+    data: PinyonScriptRegularData,
   },
 });
 export const pdfToImages = async (pdf: ArrayBuffer | Uint8Array): Promise<Buffer[]> => {

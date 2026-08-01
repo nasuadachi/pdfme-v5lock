@@ -72,7 +72,7 @@ const formUiRender = async (arg: UIRenderProps<MultiVariableTextSchema>) => {
   let variables: Record<string, string> = {};
   if (value) {
     try {
-      const parsed = JSON.parse(value);
+      const parsed = JSON.parse(value) as unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         variables = parsed as Record<string, string>;
       }

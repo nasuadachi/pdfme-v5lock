@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import { PDFDocument } from '@pdfme/pdf-lib';
 import { img2pdf } from '../src/img2pdf.js';
 

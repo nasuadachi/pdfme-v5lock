@@ -21,21 +21,21 @@
   "bugs": {
     "url": "https://github.com/pdfme/pdfme/issues"
   },
-  "main": "dist/cjs/src/index.js",
-  "module": "dist/esm/src/index.js",
+  "type": "module",
+  "main": "dist/esm/src/index.node.js",
+  "module": "dist/esm/src/index.browser.js",
   "types": "dist/types/src/index.node.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/src/index.node.d.ts",
       "browser": "./dist/esm/src/index.browser.js",
-      "node": "./dist/cjs/src/index.node.js",
+      "node": "./dist/esm/src/index.node.js",
       "default": "./dist/esm/src/index.browser.js"
     }
   },
   "scripts": {
     "dev": "tsc -p tsconfig.esm.json -w",
-    "build": "run-p build:cjs build:esm",
-    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build": "npm run build:esm",
     "build:esm": "tsc -p tsconfig.esm.json",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts src --config eslint.config.mjs",
@@ -44,6 +44,7 @@
     "prettier": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@pdfme/common": "*",
     "@pdfme/pdf-lib": "*",
     "pdfjs-dist": "^4.10.38"
@@ -57,7 +58,18 @@
     "canvas": "^3.2.3"
   },
   "jest": {
+    "preset": "ts-jest/presets/default-esm",
     "resolver": "ts-jest-resolver",
+    "extensionsToTreatAsEsm": [
+      ".ts"
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1",
+      "^@pdfme/common$": "<rootDir>/../common/src/index.ts",
+      "^@pdfme/pdf-lib$": "<rootDir>/../pdf-lib/src/index.ts",
+      "^@pdfme/generator$": "<rootDir>/../generator/src/index.ts",
+      "^@pdfme/schemas$": "<rootDir>/../schemas/src/index.ts"
+    },
     "moduleFileExtensions": [
       "js",
       "ts"
@@ -66,7 +78,8 @@
       "^.+\\.ts?$": [
         "ts-jest",
         {
-          "tsconfig": "tsconfig.esm.json"
+          "tsconfig": "tsconfig.esm.json",
+          "useESM": true
         }
       ]
     },

@@ -16,9 +16,14 @@ const renderHook = <T,>(hook: () => T) => {
     result.current = hook();
     return null;
   };
-  render(<TestComponent />);
-  return { result };
+  const rendered = render(<TestComponent />);
+  return { result, ...rendered };
 };
+
+beforeEach(() => {
+  (URL.createObjectURL as jest.Mock).mockClear();
+  (URL.revokeObjectURL as jest.Mock).mockClear();
+});
 
 const createTemplate = (): Template => ({
   basePdf: 'data:application/pdf;base64,AA==',
@@ -62,7 +67,7 @@ test('useUIPreProcessor runs pdf sizing and imaging in parallel with isolated bu
   pdf2sizeMock.mockImplementation(() => pdf2sizePromise);
   pdf2imgMock.mockResolvedValueOnce([new Uint8Array([137, 80, 78, 71]).buffer]);
 
-  const { result } = renderHook(() =>
+  const { result, unmount } = renderHook(() =>
     useUIPreProcessor({
       template,
       size,
@@ -79,6 +84,11 @@ test('useUIPreProcessor runs pdf sizing and imaging in parallel with isolated bu
   resolvePdf2size([{ width: 210, height: 297 }]);
 
   await waitFor(() => expect(result.current.pageSizes).toEqual([{ width: 210, height: 297 }]));
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  expect(result.current.backgrounds).toEqual(['blob:pdfme-test']);
+
+  unmount();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pdfme-test');
 });
 
 test('useInitEvents paste ignores missing DOM nodes instead of storing null active elements', () => {

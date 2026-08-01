@@ -1,4 +1,9 @@
-import UPNG from '@pdf-lib/upng';
+import UPNGImport from '@pdf-lib/upng';
+
+const UPNG =
+  'decode' in UPNGImport
+    ? UPNGImport
+    : (UPNGImport as unknown as { default: typeof UPNGImport }).default;
 
 const getImageType = (ctype: number) => {
   if (ctype === 0) return PngType.Greyscale;

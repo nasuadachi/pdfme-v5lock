@@ -42,8 +42,8 @@
     "build:node": "tsc -p tsconfig.node.json",
     "clean": "rimraf dist",
     "lint": "eslint --ext .ts src --config eslint.config.mjs",
-    "test": "jest --runInBand --openHandlesTimeout=0",
-    "test:update-snapshots": "jest --updateSnapshot",
+    "test": "node ../../scripts/run-jest-files.cjs",
+    "test:update-snapshots": "node ../../scripts/run-jest-files.cjs --updateSnapshot",
     "prune": "ts-prune src",
     "prettier": "prettier --write 'src/**/*.ts'"
   },
@@ -66,6 +66,8 @@
       "<rootDir>/jest.setup.js"
     ],
     "moduleNameMapper": {
+      "^\\./pdfjs\\.node\\.js$": "<rootDir>/../../scripts/jest-pdfjs-loader.cjs",
+      "^@pdfme/converter$": "<rootDir>/../converter/src/index.node.ts",
       "^@pdfme/schemas/utils$": "<rootDir>/../schemas/src/utils.ts",
       "^.+\\\\.(css|less|scss)$": "identity-obj-proxy"
     },
