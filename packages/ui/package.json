@@ -41,7 +41,7 @@
     "@pdfme/converter": "*",
     "@scena/react-guides": "^0.28.2",
     "antd": "^5.27.4",
-    "dompurify": "^3.4.1",
+    "dompurify": "^3.4.12",
     "form-render": "^2.5.5",
     "globrex": "^0.1.2",
     "hotkeys-js": "^4.0.3",
