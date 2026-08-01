@@ -263,6 +263,11 @@ export const getDynamicTemplate = async (
   for (let pageIndex = 0; pageIndex < template.schemas.length; pageIndex++) {
     const pageSchemas = template.schemas[pageIndex];
 
+    if (pageSchemas.length === 0) {
+      resultPages.push([]);
+      continue;
+    }
+
     // Normalize this page's schemas
     const { items, orderMap } = normalizePageSchemas(pageSchemas, paddingTop);
 
@@ -290,8 +295,6 @@ export const getDynamicTemplate = async (
     const processedPages = processDynamicPage(items, orderMap, contentHeight, paddingTop);
     resultPages.push(...processedPages);
   }
-
-  removeTrailingEmptyPages(resultPages);
 
   // Check if anything changed - return original template if not
   if (resultPages.length === template.schemas.length) {

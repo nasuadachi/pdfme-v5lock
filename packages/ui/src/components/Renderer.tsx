@@ -9,6 +9,7 @@ import {
   Plugin,
   UIOptions,
   cloneDeep,
+  type Font,
 } from '@pdfme/common';
 import { theme as antdTheme } from 'antd';
 import { SELECTABLE_CLASSNAME } from '../constants.js';
@@ -38,11 +39,17 @@ type ReRenderCheckProps = {
 
 const useRerenderDependencies = (arg: ReRenderCheckProps) => {
   const { plugin, value, mode, scale, schema, options } = arg;
-  const _options = cloneDeep(options);
-  if (_options.font) {
-    Object.values(_options.font).forEach((fontObj) => {
-      (fontObj as { data: string }).data = '...';
+  const { font: fontOptions, ...optionsWithoutFont } = options;
+  const _options: UIOptions = cloneDeep(optionsWithoutFont);
+  if (fontOptions) {
+    const fontForKey: Font = {};
+    Object.entries(fontOptions).forEach(([fontName, fontObj]) => {
+      fontForKey[fontName] = {
+        ...fontObj,
+        data: '...',
+      };
     });
+    _options.font = fontForKey;
   }
   const optionStr = JSON.stringify(_options);
 

@@ -78,7 +78,9 @@ const Preview = ({
       .then(async (dynamicTemplate) => {
         const sl = await template2SchemasList(dynamicTemplate);
         setSchemasList(sl);
-        await refresh(dynamicTemplate);
+        if (dynamicTemplate !== template) {
+          await refresh(dynamicTemplate);
+        }
       })
       .catch((err) => console.error(`[@pdfme/ui] `, err));
   };
