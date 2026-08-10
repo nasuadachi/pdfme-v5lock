@@ -54,6 +54,7 @@
     "pack:local": "mkdir -p ${PACK_DEST:-./dist-tarballs/pdfme} && npm pack --workspace @pdfme/common --workspace @pdfme/pdf-lib --workspace @pdfme/converter --workspace @pdfme/schemas --workspace @pdfme/generator --workspace @pdfme/manipulator --workspace @pdfme/ui --pack-destination ${PACK_DEST:-./dist-tarballs/pdfme}",
     "bench:safari-pdf-cycle": "node scripts/safari-pdf-viewer-cycle.mjs",
     "bench:safari-pdf-cycle:xctrace": "node scripts/xctrace-safari-pdf-cycle.mjs",
+    "compare:images:v6-reference": "node scripts/compare-v6-image-reference.mjs",
     "test": "npm run test --workspaces",
     "test:ui:update-snapshots": "npm run -w packages/ui test -- -u",
     "lint": "npm run lint --workspaces",
