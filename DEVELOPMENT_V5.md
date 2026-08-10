@@ -4,6 +4,37 @@ PdfMe 5.5.10からフォーク
 6系で私が必要と思われるパッチを当てていく  
 mac osのみテストしています  
 
+## v5固有差分をupstreamからマージするときの確認事項
+
+v5lock固有のバックポートには、コード内に `V5LOCK-BACKPORT-...` 形式の識別子を付けています。
+upstreamをマージするときは、次のコマンドで意図的な差分を先に確認してください。
+
+```bash
+rg "V5LOCK-BACKPORT" packages DEVELOPMENT_V5.md
+```
+
+### V5LOCK-BACKPORT-20260810-PAGE-CURSOR
+
+- 対象: `packages/ui/src/hooks.ts` の `useScrollPageCursor`
+- 回帰テスト: `packages/ui/__tests__/hooks.test.tsx`
+- 症状: Designerが画面上部以外に配置されていると、次ページボタンの1回目はページがグレーになるだけで、2回目にページ移動する
+- 原因: スクロールコンテナ内の相対座標 `scrollTop` に、viewport座標の `getBoundingClientRect().top` を加えてページ境界を計算していた
+- v5lockでの修正: ページ境界をスクロールコンテナ内の座標だけで計算する
+- upstreamとの関係: v6系では各ページの可視面積を使う `getMostVisiblePageIndex` 方式へ置き換えられている
+
+マージ時の扱い:
+
+1. マージ後も旧 `useScrollPageCursor` が残る場合は、このバックポートと回帰テストを維持する。
+2. v6系の可視面積方式が取り込まれた場合は、回帰テストが成功することを確認してから、このバックポート部分だけを削除してよい。
+3. downstreamのsubkarteがv5lock修正版へ切り替わったら、subkarte側の `patches/@pdfme+ui+5.5.10.patch` は二重適用を避けるため削除する。
+
+確認コマンド:
+
+```bash
+npm run -w packages/ui test -- --runTestsByPath __tests__/hooks.test.tsx --runInBand
+npm run build:ui
+```
+
 ## 環境要件
 
 - **Node.js**: v22.17.0 を推奨

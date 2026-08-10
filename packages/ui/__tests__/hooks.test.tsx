@@ -3,7 +3,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { BLANK_PDF, type SchemaForUI, type Template } from '@pdfme/common';
 import * as converter from '@pdfme/converter';
 import * as helper from '../src/helper';
-import { useInitEvents, useUIPreProcessor } from '../src/hooks';
+import { useInitEvents, useScrollPageCursor, useUIPreProcessor } from '../src/hooks';
 
 jest.mock('@pdfme/converter', () => ({
   pdf2size: jest.fn(),
@@ -89,6 +89,38 @@ test('useUIPreProcessor runs pdf sizing and imaging in parallel with isolated bu
 
   unmount();
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pdfme-test');
+});
+
+test('useScrollPageCursor does not mix the container viewport offset into scroll thresholds', () => {
+  let scrollListener: EventListener | undefined;
+  const canvas = {
+    scrollTop: 461,
+    addEventListener: jest.fn((type: string, listener: EventListener) => {
+      if (type === 'scroll') scrollListener = listener;
+    }),
+    removeEventListener: jest.fn(),
+    getBoundingClientRect: jest.fn(() => ({ top: 500 })),
+  } as unknown as HTMLDivElement;
+  const ref = { current: canvas } as React.RefObject<HTMLDivElement>;
+  const onChangePageCursor = jest.fn();
+
+  renderHook(() =>
+    useScrollPageCursor({
+      ref,
+      pageSizes: [
+        { width: 210, height: 297 },
+        { width: 210, height: 297 },
+      ],
+      scale: 0.4,
+      pageCursor: 1,
+      onChangePageCursor,
+    }),
+  );
+
+  expect(scrollListener).toBeDefined();
+  act(() => scrollListener!(new Event('scroll')));
+
+  expect(onChangePageCursor).not.toHaveBeenCalled();
 });
 
 test('useInitEvents paste ignores missing DOM nodes instead of storing null active elements', () => {

@@ -179,11 +179,16 @@ export const useScrollPageCursor = ({
     }
 
     const scroll = ref.current.scrollTop;
-    const { top } = ref.current.getBoundingClientRect();
     const pageHeights = pageSizes.reduce((acc, cur, i) => {
       let value = (cur.height * ZOOM + RULER_HEIGHT) * scale;
       if (i === 0) {
-        value += top - value / 2;
+        // V5LOCK-BACKPORT-20260810-PAGE-CURSOR
+        // Merge notes: DEVELOPMENT_V5.md#v5lock-backport-20260810-page-cursor
+        // scrollTop and page heights are both local to this scroll container.
+        // Adding getBoundingClientRect().top mixes viewport coordinates into the
+        // calculation and resets programmatic page changes when the Designer is
+        // rendered below other content.
+        value -= value / 2;
       } else {
         value += acc[i - 1];
       }
