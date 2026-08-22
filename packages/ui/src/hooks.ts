@@ -79,10 +79,10 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     } else {
       const pdfArrayBuffer = await basePdfToArrayBuffer(basePdf);
 
-      const [_pages, imgBuffers] = await Promise.all([
-        pdf2size(pdfArrayBuffer),
-        pdf2img(pdfArrayBuffer.slice(), { scale: maxZoom }),
-      ]);
+      // Avoid keeping two PDF.js documents alive at once. Older iPads can run
+      // out of WebKit process memory when page sizing and rendering overlap.
+      const _pages = await pdf2size(pdfArrayBuffer.slice());
+      const imgBuffers = await pdf2img(pdfArrayBuffer, { scale: maxZoom });
       _pageSizes = _pages;
       paperWidth = _pageSizes[0].width * ZOOM;
       paperHeight = _pageSizes[0].height * ZOOM;

@@ -51,10 +51,10 @@ test('useUIPreProcessor stores converter failures without unhandled rejections',
   await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
 
   expect(result.current.error?.message).toContain('corrupt basePdf');
-  expect(pdf2imgMock).toHaveBeenCalledTimes(1);
+  expect(pdf2imgMock).not.toHaveBeenCalled();
 });
 
-test('useUIPreProcessor runs pdf sizing and imaging in parallel with isolated buffers', async () => {
+test('useUIPreProcessor finishes PDF sizing before imaging with isolated buffers', async () => {
   const pdf2sizeMock = converter.pdf2size as jest.MockedFunction<typeof converter.pdf2size>;
   const pdf2imgMock = converter.pdf2img as jest.MockedFunction<typeof converter.pdf2img>;
   const template = createTemplate();
@@ -72,17 +72,18 @@ test('useUIPreProcessor runs pdf sizing and imaging in parallel with isolated bu
       template,
       size,
       zoomLevel: 1,
-      maxZoom: 1,
+      maxZoom: 2,
     }),
   );
 
-  await waitFor(() => expect(pdf2imgMock).toHaveBeenCalled());
-
-  expect(pdf2sizeMock).toHaveBeenCalled();
-  expect(pdf2sizeMock.mock.calls[0][0]).not.toBe(pdf2imgMock.mock.calls[0][0]);
+  await waitFor(() => expect(pdf2sizeMock).toHaveBeenCalled());
+  expect(pdf2imgMock).not.toHaveBeenCalled();
 
   resolvePdf2size([{ width: 210, height: 297 }]);
 
+  await waitFor(() => expect(pdf2imgMock).toHaveBeenCalled());
+  expect(pdf2imgMock).toHaveBeenCalledWith(expect.any(ArrayBuffer), { scale: 2 });
+  expect(pdf2sizeMock.mock.calls[0][0]).not.toBe(pdf2imgMock.mock.calls[0][0]);
   await waitFor(() => expect(result.current.pageSizes).toEqual([{ width: 210, height: 297 }]));
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   expect(result.current.backgrounds).toEqual(['blob:pdfme-test']);
