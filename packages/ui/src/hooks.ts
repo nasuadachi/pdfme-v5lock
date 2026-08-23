@@ -1,4 +1,4 @@
-import { RefObject, useRef, useState, useCallback, useEffect } from 'react';
+import { RefObject, useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import {
   cloneDeep,
   ZOOM,
@@ -42,7 +42,6 @@ const BLANK_BACKGROUND =
 export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreProcessorProps) => {
   const [backgrounds, setBackgrounds] = useState<string[]>([]);
   const [pageSizes, setPageSizes] = useState<Size[]>([]);
-  const [scale, setScale] = useState(0);
   const [error, setError] = useState<Error | null>(null);
   const initSeqRef = useRef(0);
   const backgroundObjectUrlsRef = useRef<string[]>([]);
@@ -58,22 +57,15 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     setBackgrounds(nextBackgrounds);
   };
 
-  const init = async (prop: { template: Template; size: Size }) => {
-    const {
-      template: { basePdf, schemas },
-      size,
-    } = prop;
+  const init = async (template: Template) => {
+    const { basePdf, schemas } = template;
 
-    let paperWidth: number;
-    let paperHeight: number;
     let _backgrounds: string[];
     let _backgroundObjectUrls: string[] | undefined;
     let _pageSizes: { width: number; height: number }[];
 
     if (isBlankPdf(basePdf)) {
       const { width, height } = basePdf;
-      paperWidth = width * ZOOM;
-      paperHeight = height * ZOOM;
       _backgrounds = schemas.map(() => BLANK_BACKGROUND);
       _pageSizes = schemas.map(() => ({ width, height }));
     } else {
@@ -84,24 +76,28 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
       const _pages = await pdf2size(pdfArrayBuffer.slice());
       const imgBuffers = await pdf2img(pdfArrayBuffer, { scale: maxZoom });
       _pageSizes = _pages;
-      paperWidth = _pageSizes[0].width * ZOOM;
-      paperHeight = _pageSizes[0].height * ZOOM;
       _backgroundObjectUrls = imgBuffers.map(arrayBufferToObjectUrl);
       _backgrounds = _backgroundObjectUrls;
     }
-
-    const _scale = Math.min(
-      getScale(size.width, paperWidth),
-      getScale(size.height - RULER_HEIGHT, paperHeight),
-    );
 
     return {
       backgrounds: _backgrounds,
       backgroundObjectUrls: _backgroundObjectUrls,
       pageSizes: _pageSizes,
-      scale: _scale,
     };
   };
+
+  // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
+  // Container size changes only recompute scale; PDF sizing and imaging stay cached.
+  const scale = useMemo(() => {
+    const firstPageSize = pageSizes[0];
+    if (!firstPageSize) return 0;
+
+    return Math.min(
+      getScale(size.width, firstPageSize.width * ZOOM),
+      getScale(size.height - RULER_HEIGHT, firstPageSize.height * ZOOM),
+    );
+  }, [pageSizes, size.width, size.height]);
 
   useEffect(() => {
     const initSeq = initSeqRef.current + 1;
@@ -109,14 +105,13 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
     setBackgroundState([]);
     setError(null);
 
-    init({ template, size })
-      .then(({ pageSizes, scale, backgrounds, backgroundObjectUrls }) => {
+    init(template)
+      .then(({ pageSizes, backgrounds, backgroundObjectUrls }) => {
         if (initSeqRef.current !== initSeq) {
           backgroundObjectUrls?.forEach((url) => URL.revokeObjectURL(url));
           return;
         }
         setPageSizes(pageSizes);
-        setScale(scale);
         setBackgroundState(backgrounds, backgroundObjectUrls ?? []);
       })
       .catch((err: Error) => {
@@ -131,7 +126,7 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
         revokeBackgroundObjectUrls();
       }
     };
-  }, [template, size]);
+  }, [template, maxZoom]);
 
   return {
     backgrounds,
@@ -143,17 +138,14 @@ export const useUIPreProcessor = ({ template, size, zoomLevel, maxZoom }: UIPreP
       initSeqRef.current = initSeq;
       setError(null);
 
-      return init({ template, size }).then(
-        ({ pageSizes, scale, backgrounds, backgroundObjectUrls }) => {
-          if (initSeqRef.current !== initSeq) {
-            backgroundObjectUrls?.forEach((url) => URL.revokeObjectURL(url));
-            return;
-          }
-          setPageSizes(pageSizes);
-          setScale(scale);
-          setBackgroundState(backgrounds, backgroundObjectUrls ?? []);
-        },
-      );
+      return init(template).then(({ pageSizes, backgrounds, backgroundObjectUrls }) => {
+        if (initSeqRef.current !== initSeq) {
+          backgroundObjectUrls?.forEach((url) => URL.revokeObjectURL(url));
+          return;
+        }
+        setPageSizes(pageSizes);
+        setBackgroundState(backgrounds, backgroundObjectUrls ?? []);
+      });
     },
   };
 };

@@ -36,23 +36,44 @@ export abstract class BaseUIClass {
 
   private options: UIOptions = {};
 
-  private readonly setSize = debounce(() => {
+  // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
+  private hasResizeRendered = false;
+
+  private readonly setSize = debounce((...args: unknown[]) => {
     if (!this.domContainer) {
       return;
     }
 
-    const rect = this.domContainer.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const entries = args[0] as ResizeObserverEntry[] | undefined;
+    const entry =
+      entries?.find((candidate) => candidate.target === this.domContainer) ?? entries?.[0];
+    const rawContentBoxSize = entry?.contentBoxSize as
+      | ReadonlyArray<ResizeObserverSize>
+      | ResizeObserverSize
+      | undefined;
+    const contentBoxSize = (
+      Array.isArray(rawContentBoxSize) ? rawContentBoxSize[0] : rawContentBoxSize
+    ) as ResizeObserverSize | undefined;
+    const layoutWidth =
+      contentBoxSize?.inlineSize ?? entry?.contentRect.width ?? this.domContainer.clientWidth;
+    const layoutHeight =
+      contentBoxSize?.blockSize ?? entry?.contentRect.height ?? this.domContainer.clientHeight;
 
-    const visibleWidth = Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0));
-    const visibleHeight = Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0));
+    const isInitialRender = !this.hasResizeRendered;
+    if (
+      !isInitialRender &&
+      Math.abs(this.size.width - layoutWidth) < 0.5 &&
+      Math.abs(this.size.height - layoutHeight) < 0.5
+    ) {
+      return;
+    }
 
     this.size = {
-      height: visibleHeight,
-      width: visibleWidth,
+      height: layoutHeight,
+      width: layoutWidth,
     };
 
+    this.hasResizeRendered = true;
     this.render();
   }, 100);
 
@@ -132,7 +153,7 @@ export abstract class BaseUIClass {
     if (!this.domContainer) throw Error(DESTROYED_ERR_MSG);
     ReactDOM.unmountComponentAtNode(this.domContainer);
 
-    this.resizeObserver.unobserve(this.domContainer);
+    this.resizeObserver.disconnect();
     this.domContainer = null;
   }
 

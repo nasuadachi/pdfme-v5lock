@@ -100,7 +100,9 @@ const Preview = ({
     }
 
     init(template);
-  }, [template, inputs, size]);
+    // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
+    // Size-only changes must not parse the PDF and recreate the schema list.
+  }, [template, inputs]);
 
   useScrollPageCursor({
     ref: containerRef,

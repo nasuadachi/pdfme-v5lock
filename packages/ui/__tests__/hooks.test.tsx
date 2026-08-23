@@ -17,10 +17,16 @@ const renderHook = <T,>(hook: () => T) => {
     return null;
   };
   const rendered = render(<TestComponent />);
-  return { result, ...rendered };
+  return {
+    result,
+    ...rendered,
+    rerender: () => rendered.rerender(<TestComponent />),
+  };
 };
 
 beforeEach(() => {
+  (converter.pdf2size as jest.Mock).mockReset();
+  (converter.pdf2img as jest.Mock).mockReset();
   (URL.createObjectURL as jest.Mock).mockClear();
   (URL.revokeObjectURL as jest.Mock).mockClear();
 });
@@ -92,6 +98,40 @@ test('useUIPreProcessor finishes PDF sizing before imaging with isolated buffers
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:pdfme-test');
 });
 
+test('useUIPreProcessor recomputes only scale when container size changes', async () => {
+  const pdf2sizeMock = converter.pdf2size as jest.MockedFunction<typeof converter.pdf2size>;
+  const pdf2imgMock = converter.pdf2img as jest.MockedFunction<typeof converter.pdf2img>;
+  const template = createTemplate();
+  let size = { width: 1200, height: 1200 };
+
+  pdf2sizeMock.mockResolvedValue([{ width: 210, height: 297 }]);
+  pdf2imgMock.mockResolvedValue([new Uint8Array([137, 80, 78, 71]).buffer]);
+
+  const { result, rerender, unmount } = renderHook(() =>
+    useUIPreProcessor({
+      template,
+      size,
+      zoomLevel: 1,
+      maxZoom: 2,
+    }),
+  );
+
+  await waitFor(() => expect(result.current.backgrounds).toEqual(['blob:pdfme-test']));
+  const initialScale = result.current.scale;
+  const initialRevokeCount = (URL.revokeObjectURL as jest.Mock).mock.calls.length;
+
+  size = { width: 100, height: 100 };
+  rerender();
+
+  await waitFor(() => expect(result.current.scale).toBeLessThan(initialScale));
+  expect(result.current.backgrounds).toEqual(['blob:pdfme-test']);
+  expect(pdf2sizeMock).toHaveBeenCalledTimes(1);
+  expect(pdf2imgMock).toHaveBeenCalledTimes(1);
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(initialRevokeCount);
+
+  unmount();
+});
+
 test('useScrollPageCursor does not mix the container viewport offset into scroll thresholds', () => {
   let scrollListener: EventListener | undefined;
   const canvas = {
@@ -154,9 +194,7 @@ test('useInitEvents paste ignores missing DOM nodes instead of storing null acti
   const past = { current: [] as SchemaForUI[][] };
   const future = { current: [] as SchemaForUI[][] };
 
-  let shortcuts:
-    | Parameters<typeof helper.initShortCuts>[0]
-    | undefined;
+  let shortcuts: Parameters<typeof helper.initShortCuts>[0] | undefined;
 
   jest.spyOn(helper, 'initShortCuts').mockImplementation((arg) => {
     shortcuts = arg;

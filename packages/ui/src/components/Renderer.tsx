@@ -56,6 +56,11 @@ const useRerenderDependencies = (arg: ReRenderCheckProps) => {
   return useMemo(() => {
     if (plugin?.uninterruptedEditMode && mode === 'designer') {
       return [mode];
+    } else if (plugin?.uninterruptedEditMode) {
+      // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
+      // Keep interactive plugin DOM alive when only the surrounding Paper scale changes.
+      // Value/schema/options changes still re-run ui() in Form and Viewer modes.
+      return [value, mode, JSON.stringify(schema), optionStr];
     } else {
       return [value, mode, scale, JSON.stringify(schema), optionStr];
     }

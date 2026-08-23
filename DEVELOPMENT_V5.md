@@ -2,7 +2,7 @@
 
 PdfMe 5.5.10からフォーク  
 6系で私が必要と思われるパッチを当てていく  
-mac osのみテストしています  
+mac osのみテストしています
 
 ## v5固有差分をupstreamからマージするときの確認事項
 
@@ -32,6 +32,27 @@ rg "V5LOCK-BACKPORT" packages DEVELOPMENT_V5.md
 
 ```bash
 npm run -w packages/ui test -- --runTestsByPath __tests__/hooks.test.tsx --runInBand
+npm run build:ui
+```
+
+### V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
+
+- 対象: `packages/ui/src/class.ts`, `packages/ui/src/hooks.ts`, `packages/ui/src/components/Preview.tsx`, `packages/ui/src/components/Renderer.tsx`
+- 回帰テスト: `packages/ui/__tests__/hooks.test.tsx`, `packages/ui/__tests__/components/Renderer.test.tsx`
+- 症状: iPad Safari のネイティブピンチで Form のコンテナ寸法が通知されると、PDF 背景の再変換と plugin `ui()` の再実行が連鎖し、Fabric Canvas が破棄・再生成される
+- 原因: viewport との交差寸法を layout size として扱い、`size` を PDF 前処理・schema 初期化・plugin DOM の再生成依存に含めていた
+- v5lockでの修正:
+  1. ResizeObserver の layout box を使用し、同じ寸法の通知では `render()` しない
+  2. PDF 前処理を `template` / `maxZoom` の変更に限定し、`scale` は保持済み `pageSizes` と現在の `size` から同期計算する
+  3. Preview の schema 初期化を `template` / `inputs` の変更に限定する
+  4. `uninterruptedEditMode` plugin は Form / Viewer でも scale-only 変更時に既存 DOM を維持する
+
+downstream の Fabric plugin は `uninterruptedEditMode: true` を指定する。これにより実際の template、value、schema、options 変更では従来どおり `ui()` を再実行し、scale-only 変更だけを非破壊に扱う。
+
+確認コマンド:
+
+```bash
+npm run -w packages/ui test -- --runTestsByPath __tests__/hooks.test.tsx __tests__/components/Renderer.test.tsx --runInBand
 npm run build:ui
 ```
 
@@ -81,6 +102,7 @@ npm run build
 ```
 
 ビルド順序は依存関係に基づいています：
+
 1. `clean` - 全パッケージの dist ディレクトリを削除
 2. `pdf-lib` → `common` → `converter` → `schemas` （順次）
 3. `generator` / `ui` / `manipulator` （並列）
@@ -135,12 +157,12 @@ npm run prettier
 
 ## パッケージ構成
 
-| パッケージ | 説明 |
-|---|---|
-| `@pdfme/common` | 共通型、ヘルパー、スキーマ定義 |
-| `@pdfme/pdf-lib` | pdf-lib 用のラッパー |
-| `@pdfme/converter` | PDF と画像の相互変換 |
-| `@pdfme/schemas` | テンプレートスキーマ |
-| `@pdfme/generator` | PDF 生成エンジン |
-| `@pdfme/manipulator` | PDF の操作（ページ追加・削除など） |
-| `@pdfme/ui` | React コンポーネント（エディタ UI） |
+| パッケージ           | 説明                                |
+| -------------------- | ----------------------------------- |
+| `@pdfme/common`      | 共通型、ヘルパー、スキーマ定義      |
+| `@pdfme/pdf-lib`     | pdf-lib 用のラッパー                |
+| `@pdfme/converter`   | PDF と画像の相互変換                |
+| `@pdfme/schemas`     | テンプレートスキーマ                |
+| `@pdfme/generator`   | PDF 生成エンジン                    |
+| `@pdfme/manipulator` | PDF の操作（ページ追加・削除など）  |
+| `@pdfme/ui`          | React コンポーネント（エディタ UI） |
