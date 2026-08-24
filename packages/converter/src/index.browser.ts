@@ -2,9 +2,13 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { pdf2img as _pdf2img, Pdf2ImgOptions } from './pdf2img.js';
 import { pdf2size as _pdf2size, Pdf2SizeOptions } from './pdf2size.js';
 
+// V5LOCK-BACKPORT-20260825-PDFJS-WORKER-ASSET
+// Subkarte / management-app は PDF.js Worker を同じアプリ資産へコピーする。
+// package specifier を import.meta.url から解決すると本番バンドルにも裸の .mjs URL が残り、
+// Amplify Hosting の SPA rewrite により index.html が返るため、アプリの base URI を基準にする。
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/legacy/build/pdf.worker.mjs',
-  import.meta.url,
+  'assets/pdfjs/pdf.worker.min.js',
+  document.baseURI,
 ).toString();
 const pdfJsDocumentOptions = {
   isEvalSupported: false,

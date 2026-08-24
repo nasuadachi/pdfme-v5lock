@@ -13,6 +13,14 @@ upstreamをマージするときは、次のコマンドで意図的な差分を
 rg "V5LOCK-BACKPORT" packages DEVELOPMENT_V5.md
 ```
 
+### V5LOCK-BACKPORT-20260825-PDFJS-WORKER-ASSET
+
+- 対象: `packages/converter/src/index.browser.ts`
+- 症状: Angularの本番バンドルで`pdf2img`または`pdf2size`を呼ぶと、PDF.js Workerの取得に失敗する
+- 原因: `pdfjs-dist/legacy/build/pdf.worker.mjs`を`import.meta.url`から解決すると裸の`.mjs` URLが残り、Amplify HostingのSPA rewriteによりそのURLへ`index.html`が返る
+- v5lockでの修正: Subkarte / management-appがビルド時に配置する`assets/pdfjs/pdf.worker.min.js`を、`document.baseURI`基準で既定Workerとして使用する
+- メモリ方針: Workerをdata URLとしてConverterへ埋め込まず、低メモリiPadのメインバンドルへWorker文字列を常駐させない
+
 ### V5LOCK-BACKPORT-20260824-MVT-PROP-PANEL-ORDER
 
 - 対象: `packages/schemas/src/multiVariableText/propPanel.ts`
