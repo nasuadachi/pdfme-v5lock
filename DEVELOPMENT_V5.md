@@ -13,6 +13,23 @@ upstreamをマージするときは、次のコマンドで意図的な差分を
 rg "V5LOCK-BACKPORT" packages DEVELOPMENT_V5.md
 ```
 
+### V5LOCK-BACKPORT-20260824-MVT-PROP-PANEL-ORDER
+
+- 対象: `packages/schemas/src/multiVariableText/propPanel.ts`
+- 回帰テスト: `packages/schemas/__tests__/multiVariableTextPropPanel.test.ts`
+- 症状: Designerで用紙テンプレートを新規作成すると、`Failed to find Ant form placeholder row to create dynamic variables inputs.` で初期化が失敗する
+- 原因: 同期widget描画では、`mapDynamicVariables` が後続のプレースホルダーフィールドより先に呼ばれる場合がある
+- v5lockでの修正: 同じフォーム内に検索範囲を限定し、プレースホルダーがまだなければ現在の描画スタック後に一度だけ再試行する
+
+downstreamのsubkarteがv5lock修正版へ切り替わったら、subkarte側の `patches/@pdfme+schemas+5.5.11-v5lock.7.patch` は二重適用を避けるため削除する。
+
+確認コマンド:
+
+```bash
+npm run -w packages/schemas test -- --runTestsByPath __tests__/multiVariableTextPropPanel.test.ts --runInBand
+npm run build:schemas
+```
+
 ### V5LOCK-BACKPORT-20260810-PAGE-CURSOR
 
 - 対象: `packages/ui/src/hooks.ts` の `useScrollPageCursor`

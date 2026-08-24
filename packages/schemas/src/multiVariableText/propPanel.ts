@@ -20,11 +20,21 @@ const mapDynamicVariables = (props: PropPanelWidgetProps) => {
     ]);
   }
 
-  const placeholderRowEl = document
-    .getElementById('placeholder-dynamic-var')
-    ?.closest('.ant-form-item') as HTMLElement;
+  const findPlaceholderRow = (): HTMLElement | null => {
+    const formElement = rootElement.closest('form');
+    const placeholderElement = formElement?.querySelector('#placeholder-dynamic-var');
+    return placeholderElement?.closest('.ant-form-item') as HTMLElement | null;
+  };
+  const placeholderRowEl = findPlaceholderRow();
   if (!placeholderRowEl) {
-    throw new Error('Failed to find Ant form placeholder row to create dynamic variables inputs.');
+    // form-render may invoke this widget before its following placeholder field is committed.
+    // Retry once after the current render stack instead of crashing the whole Designer.
+    void Promise.resolve().then(() => {
+      if (rootElement.isConnected && findPlaceholderRow()) {
+        mapDynamicVariables(props);
+      }
+    });
+    return;
   }
   placeholderRowEl.style.display = 'none';
 
