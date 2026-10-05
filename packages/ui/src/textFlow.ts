@@ -237,6 +237,9 @@ export class TextFlowController {
       });
       return;
     }
+    // Native input changes the source DOM even when a full row's canonical
+    // value stays unchanged after its overflow moves to the next row.
+    this.editorValues.delete(editorKey(inputIndex, pageIndex, sourceName));
     const after = copySnapshot(before);
     after.inputs[inputIndex] = { ...result.inputs };
     after.legacy[inputIndex] = new Set(result.legacyNames);
