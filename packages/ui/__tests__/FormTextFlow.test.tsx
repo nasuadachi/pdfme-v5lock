@@ -153,6 +153,107 @@ test('invalid setInputs leaves the existing controller and canonical state usabl
   form.destroy();
 });
 
+test.each([true, false])(
+  'table arrays stay normalized after setInputs and editing when text flow is %s',
+  (enabled) => {
+    const form = new TestForm({
+      domContainer: document.createElement('div'),
+      template,
+      inputs: [{ [names[0]]: '', [names[1]]: '', [names[2]]: '', table: [['old']] }],
+      options: { textFlow: { enabled } },
+    });
+    const loaded = {
+      [names[0]]: '',
+      [names[1]]: '',
+      [names[2]]: '',
+      table: [['new']],
+      patientName: 'patient',
+    };
+    const observed: Record<string, string>[][] = [];
+    form.onChangeInput(() => observed.push(form.getInputs().map((input) => ({ ...input }))));
+    act(() => form.renderForTest());
+    expect(form.getInputs()[0].table).toBe('[["old"]]');
+    act(() => form.setInputs([loaded] as unknown as Record<string, string>[]));
+    expect(loaded.table).toEqual([['new']]);
+    expect(form.getInputs()[0].table).toBe('[["new"]]');
+    expect(observed).toHaveLength(2);
+    observed.forEach((inputs) => expect(inputs[0]).toEqual({ ...loaded, table: '[["new"]]' }));
+    act(() => {
+      if (enabled) {
+        mockPreviewProps.textFlowController!.getBinding(0, 0, row(names[0]))!.commitEdit({
+          value: '本文',
+          selection: { anchor: 2, focus: 2 },
+        });
+      } else {
+        mockPreviewProps.onChangeInput({ index: 0, name: names[0], value: '本文' });
+      }
+    });
+    expect(form.getInputs()[0].table).toBe('[["new"]]');
+    expect(form.getInputs()[0].patientName).toBe('patient');
+    expect(form.getInputs()[0][names[0]]).toBe('本文');
+    form.destroy();
+  },
+);
+
+test('setInputs cancels an old pending transaction before rendering normalized replacement inputs', async () => {
+  let resolve!: (saved: boolean) => void;
+  const form = new TestForm({
+    domContainer: document.createElement('div'),
+    template,
+    inputs: [{ [names[0]]: 'あ', [names[1]]: '甲', [names[2]]: '乙' }],
+    options: {
+      textFlow: {
+        enabled: true,
+        onBeforeDiscard: () =>
+          new Promise<boolean>((done) => {
+            resolve = done;
+          }),
+      },
+    },
+  });
+  act(() => form.renderForTest());
+  act(() => {
+    mockPreviewProps.textFlowController!.getBinding(0, 0, row(names[0]))!.commitEdit({
+      value: 'あいう',
+      selection: { anchor: 3, focus: 3 },
+    });
+  });
+  act(() =>
+    form.setInputs([
+      {
+        [names[0]]: '',
+        [names[1]]: '',
+        [names[2]]: '',
+        table: [['replacement']],
+      },
+    ] as unknown as Record<string, string>[]),
+  );
+  await act(async () => {
+    resolve(true);
+    await Promise.resolve();
+    await form.whenInputsSettled();
+  });
+  expect(form.getInputs()[0]).toEqual({
+    [names[0]]: '',
+    [names[1]]: '',
+    [names[2]]: '',
+    table: '[["replacement"]]',
+  });
+  act(() => {
+    mockPreviewProps.textFlowController!.getBinding(0, 0, row(names[0]))!.commitEdit({
+      value: '新本文',
+      selection: { anchor: 3, focus: 3 },
+    });
+  });
+  expect(form.getInputs()[0]).toEqual({
+    [names[0]]: '新本',
+    [names[1]]: '文',
+    [names[2]]: '',
+    table: '[["replacement"]]',
+  });
+  form.destroy();
+});
+
 test('a disabled Form retains the original input keys and ordinary change callback ordering', () => {
   const form = new TestForm({
     domContainer: document.createElement('div'),
@@ -172,5 +273,45 @@ test('a disabled Form retains the original input keys and ordinary change callba
   });
   expect(oldValues).toEqual(['旧']);
   expect(form.getInputs()[0].text01).toBe('更新');
+  form.destroy();
+});
+
+test('a synchronous plugin notification during presave cannot commit provisional body values', async () => {
+  let reject!: (error: Error) => void;
+  const before = { [names[0]]: 'あ', [names[1]]: '甲', [names[2]]: '乙', patientName: '患者' };
+  const form = new TestForm({
+    domContainer: document.createElement('div'),
+    template,
+    inputs: [before],
+    options: {
+      textFlow: {
+        enabled: true,
+        onBeforeDiscard: () => {
+          mockPreviewProps.onChangeInput({ index: 0, name: 'patientName', value: '更新患者' });
+          return new Promise<void>((_resolve, fail) => {
+            reject = fail;
+          });
+        },
+      },
+    },
+  });
+  act(() => {
+    form.renderForTest();
+  });
+  const changes = jest.fn();
+  form.onChangeInput(changes);
+  act(() => {
+    mockPreviewProps
+      .textFlowController!.getBinding(0, 0, row(names[0]))!
+      .commitEdit({ value: 'あいう', selection: { anchor: 3, focus: 3 } });
+  });
+  expect(form.getInputs()).toEqual([before]);
+  expect(changes).not.toHaveBeenCalled();
+  await act(async () => {
+    reject(new Error('save-failed'));
+    await form.whenInputsSettled();
+  });
+  expect(form.getInputs()).toEqual([{ ...before, patientName: '更新患者' }]);
+  expect(changes).toHaveBeenCalledTimes(1);
   form.destroy();
 });

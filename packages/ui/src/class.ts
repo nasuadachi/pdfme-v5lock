@@ -202,7 +202,7 @@ type StringifiedDataItem = {
   [key: string]: string;
 };
 
-function convertToStingObjectArray(data: DataItem[]): StringifiedDataItem[] {
+export function convertToStingObjectArray(data: DataItem[]): StringifiedDataItem[] {
   return data.map((item) => {
     const stringifiedItem: StringifiedDataItem = {};
     Object.keys(item).forEach((key) => {

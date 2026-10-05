@@ -50,7 +50,7 @@ jobs:
         run: npm ci
 
       - name: Set NPM version
-        run: npm version --no-git-tag-version $VERSION --workspaces --include-workspace-root
+        run: npm version --no-git-tag-version --allow-same-version $VERSION --workspaces --include-workspace-root
 
       - name: Build
         run: npm run build

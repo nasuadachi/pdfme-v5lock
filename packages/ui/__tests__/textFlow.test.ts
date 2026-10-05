@@ -378,3 +378,79 @@ test('reset invalidates a late save completion', async () => {
   await f.controller.whenInputsSettled();
   expect(f.commit).not.toHaveBeenCalled();
 });
+
+test('a synchronous ordinary change in the save hook stays queued and survives failed persistence', async () => {
+  let reject!: (error: Error) => void;
+  const before = { [names[0]]: 'あ', [names[1]]: '甲', patientName: '患者' };
+  const f = make(
+    before,
+    {
+      enabled: true,
+      onBeforeDiscard: () => {
+        f.controller.changeInput(0, 'patientName', '更新患者');
+        return new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        });
+      },
+    },
+    template(2),
+  );
+  f.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+  expect(f.commit).not.toHaveBeenCalled();
+  expect(f.inputs()).toEqual([before]);
+  reject(new Error('save-failed'));
+  await f.controller.whenInputsSettled();
+  expect(f.inputs()).toEqual([{ ...before, patientName: '更新患者' }]);
+});
+
+test('a synchronous undo in the save hook runs after the saved displacement', async () => {
+  const before = { [names[0]]: 'あ', [names[1]]: '甲' };
+  const f = make(
+    before,
+    {
+      enabled: true,
+      onBeforeDiscard: () => {
+        f.controller.undo();
+        return true;
+      },
+    },
+    template(2),
+  );
+  f.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+  expect(f.commit).not.toHaveBeenCalled();
+  await f.controller.whenInputsSettled();
+  expect(f.inputs()).toEqual([before]);
+  expect(f.commit).toHaveBeenCalledTimes(2);
+});
+
+test('displayed pages replace original groups, invalidate old bindings, and preserve unchanged groups', () => {
+  const f = make({ [names[0]]: '', [names[1]]: '', [names[2]]: '', [names[3]]: '' });
+  const originalBinding = f.binding();
+  f.controller.setDisplayedSchemas(0, template().schemas);
+  expect(f.binding()).toBe(originalBinding);
+  f.controller.setDisplayedSchemas(0, [[row(names[0])], names.slice(1).map(row)]);
+  expect(f.binding(names[1], 1)).toBeDefined();
+  expect(f.controller.getBinding(0, 0, row(names[1]))).toBeUndefined();
+  originalBinding.commitEdit({ value: 'あいう', selection: selection(3) });
+  expect(f.commit).not.toHaveBeenCalled();
+  f.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+  expect(f.commit).not.toHaveBeenCalled();
+  f.binding(names[1], 1).commitEdit({ value: 'あいう', selection: selection(3) });
+  expect(f.inputs()[0][names[1]]).toBe('あい');
+  expect(f.inputs()[0][names[2]]).toBe('う');
+});
+
+test('undo/redo resolve their cursor field on its current displayed page', () => {
+  const f = make({ [names[0]]: '', [names[1]]: '', [names[2]]: '', [names[3]]: '' });
+  const oldDestination = fakeEditor();
+  f.binding(names[1]).registerEditor(oldDestination);
+  f.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+  (oldDestination.focusSelection as jest.Mock).mockClear();
+  f.controller.setDisplayedSchemas(0, [[row(names[0])], names.slice(1).map(row)]);
+  const newDestination = fakeEditor();
+  f.binding(names[1], 1).registerEditor(newDestination);
+  f.controller.undo();
+  f.controller.redo();
+  expect(newDestination.focusSelection).toHaveBeenLastCalledWith(selection(1));
+  expect(oldDestination.focusSelection).not.toHaveBeenCalled();
+});

@@ -49,6 +49,9 @@ const Preview = ({
   const [pageCursor, setPageCursor] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(options.zoomLevel ?? 1);
   const [schemasList, setSchemasList] = useState<SchemaForUI[][]>([[]] as SchemaForUI[][]);
+  const initSequence = useRef(0);
+  const currentPreview = useRef({ template, inputs, unitCursor, textFlowController });
+  currentPreview.current = { template, inputs, unitCursor, textFlowController };
 
   const { backgrounds, pageSizes, scale, error, refresh } = useUIPreProcessor({
     template,
@@ -60,33 +63,67 @@ const Preview = ({
   const isForm = Boolean(onChangeInput);
 
   const input = inputs[unitCursor];
+  // Bind against the pages currently on screen, including expanded table pages.
+  // Supplying a group does not modify inputs or React state.
+  textFlowController?.setDisplayedSchemas(unitCursor, schemasList);
 
   const init = (template: Template, inputOverride?: Record<string, string>) => {
-    const currentInput = inputOverride ?? input;
-    const options = { font };
-    getDynamicTemplate({
-      template,
-      input: currentInput,
-      options,
-      _cache,
-      getDynamicHeights: (value, args) => {
-        switch (args.schema.type) {
-          case 'table':
-            return getDynamicHeightsForTable(value, args);
-          default:
-            return Promise.resolve([args.schema.height]);
-        }
-      },
-    })
-      .then(async (dynamicTemplate) => {
+    const sequence = ++initSequence.current;
+    const inputIndex = unitCursor;
+    const controller = textFlowController;
+    const isCurrent = () =>
+      sequence === initSequence.current &&
+      currentPreview.current.unitCursor === inputIndex &&
+      currentPreview.current.template === template &&
+      currentPreview.current.textFlowController === controller;
+    const update = async () => {
+      while (isCurrent()) {
+        // A queued table edit must use the final canonical inputs, rather than
+        // reflowing provisional text while its pre-discard save is unresolved.
+        await controller?.whenInputsSettled();
+        if (!isCurrent()) return;
+        const currentInput = controller
+          ? currentPreview.current.inputs[inputIndex]
+          : (inputOverride ?? currentPreview.current.inputs[inputIndex]);
+        const inputSignature = JSON.stringify(currentInput);
+        const dynamicTemplate = await getDynamicTemplate({
+          template,
+          input: currentInput,
+          options: { font },
+          _cache,
+          getDynamicHeights: (value, args) => {
+            switch (args.schema.type) {
+              case 'table':
+                return getDynamicHeightsForTable(value, args);
+              default:
+                return Promise.resolve([args.schema.height]);
+            }
+          },
+        });
         const sl = await template2SchemasList(dynamicTemplate);
+        await controller?.whenInputsSettled();
+        if (!isCurrent()) return;
+        if (
+          controller &&
+          inputSignature !== JSON.stringify(currentPreview.current.inputs[inputIndex])
+        )
+          continue;
         setSchemasList(sl);
         if (dynamicTemplate !== template) {
           await refresh(dynamicTemplate);
         }
-      })
-      .catch((err) => console.error(`[@pdfme/ui] `, err));
+        return;
+      }
+    };
+    void update().catch((err) => console.error(`[@pdfme/ui] `, err));
   };
+
+  useEffect(
+    () => () => {
+      initSequence.current += 1;
+    },
+    [],
+  );
 
   // Update component state only when _options_ changes
   // Ignore exhaustive useEffect dependency warnings here
@@ -105,7 +142,7 @@ const Preview = ({
     init(template);
     // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
     // Size-only changes must not parse the PDF and recreate the schema list.
-  }, [template, inputs]);
+  }, [template, inputs, unitCursor, textFlowController]);
 
   useScrollPageCursor({
     ref: containerRef,

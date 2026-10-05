@@ -9,7 +9,7 @@ import {
   checkTemplate,
   checkUIOptions,
 } from '@pdfme/common';
-import { PreviewUI } from './class.js';
+import { PreviewUI, convertToStingObjectArray } from './class.js';
 import { DESTROYED_ERR_MSG } from './constants.js';
 import AppContextProvider from './components/AppContextProvider.js';
 import Preview from './components/Preview.js';
@@ -45,13 +45,14 @@ class Form extends PreviewUI {
   public setInputs(inputs: { [key: string]: string }[]): void {
     const previousInputs = this.getInputs();
     checkInputs(inputs);
+    const stringInputs = convertToStingObjectArray(inputs);
     // Reset before the render so an old provisional queue cannot reach new inputs.
     const nextInputs =
       this.getOptions().textFlow?.enabled === true
-        ? hydrateTextFlowInputs(this.template, inputs)
-        : inputs;
+        ? hydrateTextFlowInputs(this.template, stringInputs)
+        : stringInputs;
     this.textFlowController?.reset(nextInputs);
-    super.setInputs(inputs);
+    super.setInputs(nextInputs);
 
     const changedInputs: Array<{ index: number; name: string; value: string }> = [];
 

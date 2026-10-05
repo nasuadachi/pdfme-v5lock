@@ -42,6 +42,8 @@ export class TextFlowController {
   private readonly bindings = new Map<string, TextFlowBinding>();
   private readonly editors = new Map<string, TextFlowEditor>();
   private readonly editorValues = new Map<string, { value: string; legacy: boolean }>();
+  private readonly displayedSchemas = new Map<number, Schema[][]>();
+  private readonly groupVersions = new Map<number, number>();
   private queue: Transaction[] = [];
   private draining?: Promise<void>;
   private epoch = 0;
@@ -94,10 +96,42 @@ export class TextFlowController {
     this.editors.clear();
     this.editorValues.clear();
     this.bindings.clear();
+    this.displayedSchemas.clear();
+    this.groupVersions.clear();
   }
 
   public async whenInputsSettled(): Promise<void> {
     while (this.draining) await this.draining;
+  }
+
+  /** Preview supplies the actual pages after tables have expanded or contracted. */
+  public setDisplayedSchemas(inputIndex: number, schemas: Schema[][]) {
+    const previous = this.getSchemas(inputIndex);
+    const signature = (pages: Schema[][]) =>
+      JSON.stringify(pages.map((page) => getTextFlowTargets(page)));
+    this.displayedSchemas.set(
+      inputIndex,
+      schemas.map((page) => [...page]),
+    );
+    if (signature(previous) === signature(schemas)) return;
+    this.groupVersions.set(inputIndex, (this.groupVersions.get(inputIndex) ?? 0) + 1);
+    this.bindings.forEach((_binding, key) => {
+      if ((JSON.parse(key) as [number, number, string])[0] === inputIndex)
+        this.bindings.delete(key);
+    });
+    this.invalidPages.clear();
+  }
+
+  private getSchemas(inputIndex: number): Schema[][] {
+    return this.displayedSchemas.get(inputIndex) ?? this.getTemplate().schemas;
+  }
+
+  private getCurrentFocus(focus?: Focus): Focus | undefined {
+    if (!focus) return undefined;
+    const pageIndex = this.getSchemas(focus.inputIndex).findIndex((page) =>
+      getTextFlowTargets(page).targets.some((target) => target.name === focus.name),
+    );
+    return pageIndex < 0 ? undefined : { ...focus, pageIndex };
   }
 
   public getBinding(
@@ -106,7 +140,7 @@ export class TextFlowController {
     schema: Schema,
   ): TextFlowBinding | undefined {
     if (schema.type !== 'text' || schema.readOnly) return undefined;
-    const page = this.getTemplate().schemas[pageIndex];
+    const page = this.getSchemas(inputIndex)[pageIndex];
     if (!page) return undefined;
     const { targets, invalidReason } = getTextFlowTargets(page);
     if (invalidReason) {
@@ -128,12 +162,17 @@ export class TextFlowController {
     const key = editorKey(inputIndex, pageIndex, schema.name);
     const existing = this.bindings.get(key);
     if (existing) return existing;
+    const epoch = this.epoch;
+    const groupVersion = this.groupVersions.get(inputIndex) ?? 0;
+    const isCurrent = () =>
+      epoch === this.epoch && groupVersion === (this.groupVersions.get(inputIndex) ?? 0);
     const isLegacy = () => this.state.legacy[inputIndex]?.has(schema.name) ?? false;
     const binding: TextFlowBinding = {
       get isLegacy() {
         return isLegacy();
       },
       registerEditor: (editor) => {
+        if (!isCurrent()) return () => undefined;
         this.editors.set(key, editor);
         const value = this.state.inputs[inputIndex]?.[schema.name] ?? '';
         this.editorValues.set(key, { value, legacy: binding.isLegacy });
@@ -146,12 +185,15 @@ export class TextFlowController {
         };
       },
       commitEdit: (edit) => {
+        if (!isCurrent()) return;
         this.edit(inputIndex, pageIndex, schema.name, edit);
       },
       undo: () => {
+        if (!isCurrent()) return;
         this.undo();
       },
       redo: () => {
+        if (!isCurrent()) return;
         this.redo();
       },
     };
@@ -175,7 +217,7 @@ export class TextFlowController {
       selection: edit.beforeSelection ?? edit.selection,
     };
     const result = distributeTextFlow({
-      targets: getTextFlowTargets(this.getTemplate().schemas[pageIndex]).targets,
+      targets: getTextFlowTargets(this.getSchemas(inputIndex)[pageIndex]).targets,
       inputs: input,
       sourceName,
       value: edit.value,
@@ -325,12 +367,21 @@ export class TextFlowController {
 
   private startDrain() {
     const epoch = this.epoch;
-    const pending = this.drain(epoch).finally(() => {
+    let resolveDrain!: () => void;
+    let rejectDrain!: (reason: unknown) => void;
+    const work = new Promise<void>((resolve, reject) => {
+      resolveDrain = resolve;
+      rejectDrain = reject;
+    });
+    const pending = work.finally(() => {
       if (this.draining !== pending) return;
       this.draining = undefined;
       if (this.queue.length) this.startDrain();
     });
     this.draining = pending;
+    // A save hook may synchronously notify another plugin change. Publish the
+    // pending queue first so that change cannot commit provisional body values.
+    void this.drain(epoch).then(resolveDrain, rejectDrain);
   }
 
   private async drain(epoch: number) {
@@ -410,6 +461,9 @@ export class TextFlowController {
   }
 
   private restoreFocus(focus: Focus) {
+    const current = this.getCurrentFocus(focus);
+    if (!current) return;
+    focus = current;
     const editor = this.editors.get(editorKey(focus.inputIndex, focus.pageIndex, focus.name));
     editor?.setValue(
       this.state.inputs[focus.inputIndex]?.[focus.name] ?? '',
@@ -420,21 +474,26 @@ export class TextFlowController {
   }
 
   private syncEditors(focus?: Focus, moveFocus = true) {
+    const currentFocus = this.getCurrentFocus(focus);
     this.editors.forEach((editor, key) => {
       const [inputIndex, pageIndex, name] = JSON.parse(key) as [number, number, string];
       const isFocus =
-        focus?.inputIndex === inputIndex && focus.pageIndex === pageIndex && focus.name === name;
+        currentFocus?.inputIndex === inputIndex &&
+        currentFocus.pageIndex === pageIndex &&
+        currentFocus.name === name;
       const value = this.state.inputs[inputIndex]?.[name] ?? '';
       const legacy = this.state.legacy[inputIndex]?.has(name) ?? false;
       const previous = this.editorValues.get(key);
       if (isFocus || !previous || previous.value !== value || previous.legacy !== legacy) {
         this.editorValues.set(key, { value, legacy });
-        editor.setValue(value, isFocus ? focus.selection : undefined, legacy);
+        editor.setValue(value, isFocus ? currentFocus.selection : undefined, legacy);
       }
     });
-    if (focus && moveFocus) {
-      const editor = this.editors.get(editorKey(focus.inputIndex, focus.pageIndex, focus.name));
-      if (!this.hasComposition()) editor?.focusSelection(focus.selection);
+    if (currentFocus && moveFocus) {
+      const editor = this.editors.get(
+        editorKey(currentFocus.inputIndex, currentFocus.pageIndex, currentFocus.name),
+      );
+      if (!this.hasComposition()) editor?.focusSelection(currentFocus.selection);
     }
   }
 
