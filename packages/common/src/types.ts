@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PDFPage, PDFDocument } from '@pdfme/pdf-lib';
 import type { ThemeConfig, GlobalToken } from 'antd';
 import type { WidgetProps as _PropPanelWidgetProps, Schema as _PropPanelSchema } from 'form-render';
+import type { TextFlowBinding } from './textFlow.js';
 import {
   Lang,
   Dict,
@@ -92,6 +93,7 @@ export type UIRenderProps<T extends Schema> = {
   i18n: (key: string) => string;
   scale: number;
   _cache: Map<string | number, unknown>;
+  textFlow?: TextFlowBinding;
 };
 
 /**

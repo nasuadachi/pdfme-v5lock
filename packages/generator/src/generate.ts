@@ -7,6 +7,7 @@ import {
   replacePlaceholders,
   pt2mm,
   cloneDeep,
+  hydrateTextFlowInputs,
 } from '@pdfme/common';
 import { getDynamicHeightsForTable } from '@pdfme/schemas';
 import {
@@ -19,8 +20,16 @@ import {
 
 const generate = async (props: GenerateProps): Promise<Uint8Array> => {
   checkGenerateProps(props);
-  const { inputs, template: _template, options = {}, plugins: userPlugins = {} } = props;
+  const {
+    inputs: originalInputs,
+    template: _template,
+    options = {},
+    plugins: userPlugins = {},
+  } = props;
   const template = cloneDeep(_template);
+  const inputs = options.textFlow?.enabled
+    ? hydrateTextFlowInputs(template, originalInputs)
+    : originalInputs;
 
   const basePdf = template.basePdf;
 

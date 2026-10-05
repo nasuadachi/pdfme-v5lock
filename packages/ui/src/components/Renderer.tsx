@@ -35,12 +35,16 @@ type ReRenderCheckProps = {
   scale: number;
   schema: SchemaForUI;
   options: UIOptions;
+  textFlow?: UIRenderProps<Schema>['textFlow'];
 };
 
 const useRerenderDependencies = (arg: ReRenderCheckProps) => {
-  const { plugin, value, mode, scale, schema, options } = arg;
-  const { font: fontOptions, ...optionsWithoutFont } = options;
+  const { plugin, value, mode, scale, schema, options, textFlow } = arg;
+  // structuredClone rejects callbacks. Text-flow callbacks are runtime handlers
+  // read by the controller; only their enabled flag belongs to the render key.
+  const { font: fontOptions, textFlow: flowOptions, ...optionsWithoutFont } = options;
   const _options: UIOptions = cloneDeep(optionsWithoutFont);
+  if (flowOptions) _options.textFlow = { enabled: flowOptions.enabled };
   if (fontOptions) {
     const fontForKey: Font = {};
     Object.entries(fontOptions).forEach(([fontName, fontObj]) => {
@@ -54,17 +58,21 @@ const useRerenderDependencies = (arg: ReRenderCheckProps) => {
   const optionStr = JSON.stringify(_options);
 
   return useMemo(() => {
-    if (plugin?.uninterruptedEditMode && mode === 'designer') {
-      return [mode];
+    if (textFlow && mode === 'form') {
+      // Opted-in text editors are updated by their controller, without replacing
+      // the contenteditable node or disturbing dictation/composition focus.
+      return [mode, JSON.stringify(schema), optionStr, textFlow, undefined, undefined];
+    } else if (plugin?.uninterruptedEditMode && mode === 'designer') {
+      return [mode, undefined, undefined, undefined, undefined, undefined];
     } else if (plugin?.uninterruptedEditMode) {
       // V5LOCK-BACKPORT-20260823-SAFARI-PINCH-STABILITY
       // Keep interactive plugin DOM alive when only the surrounding Paper scale changes.
       // Value/schema/options changes still re-run ui() in Form and Viewer modes.
-      return [value, mode, JSON.stringify(schema), optionStr];
+      return [value, mode, JSON.stringify(schema), optionStr, undefined, undefined];
     } else {
-      return [value, mode, scale, JSON.stringify(schema), optionStr];
+      return [value, mode, scale, JSON.stringify(schema), optionStr, undefined];
     }
-  }, [value, mode, scale, schema, optionStr, plugin]);
+  }, [value, mode, scale, schema, optionStr, plugin, textFlow]);
 };
 
 const Wrapper = ({
@@ -111,8 +119,18 @@ const Wrapper = ({
 );
 
 const Renderer = (props: RendererProps) => {
-  const { schema, basePdf, value, mode, onChange, stopEditing, tabIndex, placeholder, scale } =
-    props;
+  const {
+    schema,
+    basePdf,
+    value,
+    mode,
+    onChange,
+    stopEditing,
+    tabIndex,
+    placeholder,
+    scale,
+    textFlow,
+  } = props;
 
   const pluginsRegistry = useContext(PluginsRegistry);
   const options = useContext(OptionsContext);
@@ -130,6 +148,7 @@ const Renderer = (props: RendererProps) => {
     scale,
     schema,
     options,
+    textFlow,
   });
 
   useEffect(() => {
@@ -137,6 +156,25 @@ const Renderer = (props: RendererProps) => {
 
     ref.current.innerHTML = '';
     const render = plugin.ui;
+    let disposed = false;
+    const unregisterEditors: (() => void)[] = [];
+    const editorBinding = textFlow
+      ? {
+          get isLegacy() {
+            return textFlow.isLegacy;
+          },
+          registerEditor: (editor: Parameters<typeof textFlow.registerEditor>[0]) => {
+            if (disposed) return () => undefined;
+            const unregister = textFlow.registerEditor(editor);
+            unregisterEditors.push(unregister);
+            return unregister;
+          },
+          commitEdit: (edit: Parameters<typeof textFlow.commitEdit>[0]) =>
+            textFlow.commitEdit(edit),
+          undo: textFlow.undo ? () => textFlow.undo?.() : undefined,
+          redo: textFlow.redo ? () => textFlow.redo?.() : undefined,
+        }
+      : undefined;
 
     void render({
       value,
@@ -153,9 +191,12 @@ const Renderer = (props: RendererProps) => {
       i18n,
       scale,
       _cache,
+      textFlow: editorBinding,
     });
 
     return () => {
+      disposed = true;
+      unregisterEditors.forEach((unregister) => unregister());
       if (ref.current) {
         ref.current.innerHTML = '';
       }

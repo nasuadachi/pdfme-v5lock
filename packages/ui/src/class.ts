@@ -18,6 +18,7 @@ import {
   checkUIOptions,
   checkPreviewProps,
   pluginRegistry,
+  hydrateTextFlowInputs,
 } from '@pdfme/common';
 import { builtInPlugins } from '@pdfme/schemas';
 
@@ -165,7 +166,11 @@ export abstract class PreviewUI extends BaseUIClass {
   constructor(props: PreviewProps) {
     super(props);
     checkPreviewProps(props);
-    this.inputs = convertToStingObjectArray(cloneDeep(props.inputs));
+    const inputs = convertToStingObjectArray(cloneDeep(props.inputs));
+    this.inputs =
+      this.getOptions().textFlow?.enabled === true
+        ? hydrateTextFlowInputs(this.template, inputs)
+        : inputs;
   }
 
   public getInputs() {
@@ -178,7 +183,11 @@ export abstract class PreviewUI extends BaseUIClass {
     if (!this.domContainer) throw Error(DESTROYED_ERR_MSG);
     checkInputs(inputs);
 
-    this.inputs = convertToStingObjectArray(inputs);
+    const stringInputs = convertToStingObjectArray(inputs);
+    this.inputs =
+      this.getOptions().textFlow?.enabled === true
+        ? hydrateTextFlowInputs(this.template, stringInputs)
+        : stringInputs;
     this.render();
   }
 

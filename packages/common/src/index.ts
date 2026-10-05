@@ -67,6 +67,27 @@ import {
 import { getDynamicTemplate } from './dynamicTemplate.js';
 import { replacePlaceholders } from './expression.js';
 import { pluginRegistry } from './pluginRegistry.js';
+export {
+  parseTextFlowName,
+  getTextFlowTargets,
+  hydrateTextFlowInputs,
+  countTextFlowWidth,
+  getTextFlowLegacyNames,
+  distributeTextFlow,
+} from './textFlow.js';
+export type {
+  TextFlowSelection,
+  TextFlowTarget,
+  TextFlowChangedValue,
+  TextFlowDiscardEvent,
+  TextFlowNotice,
+  TextFlowOptions,
+  TextFlowEdit,
+  TextFlowEditor,
+  TextFlowBinding,
+  DistributeTextFlowArgs,
+  TextFlowDistribution,
+} from './textFlow.js';
 
 export {
   PDFME_VERSION,

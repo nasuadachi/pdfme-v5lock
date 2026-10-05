@@ -1,0 +1,419 @@
+import {
+  countTextFlowWidth,
+  distributeTextFlow,
+  getTextFlowLegacyNames,
+  getTextFlowTargets,
+  hydrateTextFlowInputs,
+  parseTextFlowName,
+  type TextFlowDistribution,
+  type TextFlowTarget,
+} from '../src/textFlow';
+import { CommonOptions } from '../src/schema';
+import type { Schema } from '../src/types';
+
+const targets = (...caps: number[]): TextFlowTarget[] =>
+  caps.map((cap, index) => parseTextFlowName(`text${index + 1}-${cap}`)!);
+const successful = (result: TextFlowDistribution) => {
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw Error(result.reason);
+  return result;
+};
+const page = (names: string[]): Schema[] =>
+  names.map((name) => ({
+    name,
+    type: 'text',
+    position: { x: 0, y: 0 },
+    width: 10,
+    height: 5,
+  }));
+
+describe('text flow configuration and legacy aliases', () => {
+  test.each([
+    ['text1', 1, 20, 'text1'],
+    ['text01', 1, 20, 'text01'],
+    ['text001', 1, 20, 'text001'],
+    ['text1-20', 1, 20, 'text1'],
+    ['text02-8', 2, 8, 'text02'],
+    ['text003-15', 3, 15, 'text003'],
+    ['text1-020', 1, 20, 'text1'],
+  ])('parses %s without changing zero padding', (name, row, maxLength, legacyName) => {
+    expect(parseTextFlowName(String(name))).toEqual({ name, row, maxLength, legacyName });
+  });
+
+  test.each([
+    'text0',
+    'text000',
+    'Text1',
+    'text1-0',
+    'text1-00',
+    'text1--1',
+    'text1-8a',
+    'text9007199254740992',
+    'text1-9007199254740992',
+    'patientName',
+  ])('ignores %s', (name) => {
+    expect(parseTextFlowName(name)).toBeUndefined();
+  });
+
+  test('uses numeric ordering, existing targets, type, and editability', () => {
+    const schemas = page(['text010', 'text002-8', 'text1', 'patientName', 'text3', 'text4']);
+    schemas[4].readOnly = true;
+    schemas[5].type = 'image';
+    expect(getTextFlowTargets(schemas).targets.map(({ name }) => name)).toEqual([
+      'text1',
+      'text002-8',
+      'text010',
+    ]);
+  });
+
+  test('duplicate numeric rows fail closed on that page', () => {
+    const result = getTextFlowTargets(page(['text1', 'text001-8', 'text2']));
+    expect(result.targets).toEqual([]);
+    expect(result.invalidReason).toContain('1');
+  });
+
+  test('hydrates missing current keys while preserving empty current keys and unrelated data', () => {
+    const input = Object.freeze({
+      text1: 'old 1',
+      'text1-20': '',
+      text02: 'old 2',
+      text001: 'old 001',
+      patientName: 'kept',
+      unrelated: ['kept array'],
+    });
+    const template = { schemas: [page(['text1-20', 'text02-8', 'text001-20', 'patientName'])] };
+    const [hydrated] = hydrateTextFlowInputs(template, [input]);
+    expect(hydrated).toEqual({
+      ...input,
+      'text02-8': 'old 2',
+      'text001-20': 'old 001',
+    });
+    expect(hydrated['text1-20']).toBe('');
+    expect(input).not.toHaveProperty('text02-8');
+    expect(hydrated).not.toBe(input);
+  });
+
+  test('current key presence wins even when undefined; inherited old keys never hydrate', () => {
+    const input = Object.assign(Object.create({ text02: 'inherited' }), {
+      text1: 'old',
+      'text1-20': undefined,
+    }) as Record<string, unknown>;
+    const [hydrated] = hydrateTextFlowInputs({ schemas: [page(['text1-20', 'text02-8'])] }, [
+      input,
+    ]);
+    expect(hydrated).toHaveProperty('text1-20', undefined);
+    expect(hydrated).not.toHaveProperty('text02-8');
+  });
+
+  test('callbacks are validated but neither invoked nor required on disabled options', () => {
+    const hook = jest.fn();
+    expect(
+      CommonOptions.safeParse({ textFlow: { enabled: true, onBeforeDiscard: hook } }).success,
+    ).toBe(true);
+    expect(CommonOptions.safeParse({ textFlow: { enabled: false } }).success).toBe(true);
+    expect(
+      CommonOptions.safeParse({ textFlow: { enabled: true, onNotice: 'wrong' } }).success,
+    ).toBe(false);
+    expect(hook).not.toHaveBeenCalled();
+  });
+});
+
+describe('fullwidth equivalents and grapheme safety', () => {
+  test.each([
+    ['abc 123', 3.5],
+    ['ｶﾀｶﾅ', 2],
+    ['ｶﾞ', 1],
+    ['漢字　', 3],
+    ['e\u0301', 0.5],
+    ['か\u3099', 1],
+    ['👨‍👩‍👧‍👦', 1],
+    ['🇯🇵', 1],
+    ['1️⃣', 1],
+    ['A\r\nB', 1],
+  ])('counts %s as %s', (value, width) => {
+    expect(countTextFlowWidth(String(value))).toBe(width);
+  });
+
+  test('fallback joins marks, emoji joins, and flags without breaking clusters', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { value: undefined, configurable: true });
+    try {
+      expect(countTextFlowWidth('e\u0301か\u3099👨‍👩‍👧‍👦🇯🇵ｶﾞ')).toBe(4.5);
+      const result = successful(
+        distributeTextFlow({
+          targets: targets(1, 1, 1),
+          inputs: {},
+          sourceName: 'text1-1',
+          value: '👨‍👩‍👧‍👦🇯🇵か\u3099',
+        }),
+      );
+      expect(Object.values(result.inputs)).toEqual(['👨‍👩‍👧‍👦', '🇯🇵', 'か\u3099']);
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+      else Reflect.deleteProperty(Intl, 'Segmenter');
+    }
+  });
+});
+
+describe('transactional row distribution', () => {
+  test('100 fullwidth characters fill five default rows; ASCII uses halfwidth equivalents', () => {
+    const rows = getTextFlowTargets(
+      page(Array.from({ length: 16 }, (_, i) => `text${i + 1}`)),
+    ).targets;
+    const result = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1',
+        value: 'あ'.repeat(100),
+      }),
+    );
+    expect(rows.slice(0, 5).map(({ name }) => result.inputs[name])).toEqual(
+      Array(5).fill('あ'.repeat(20)),
+    );
+    const ascii = successful(
+      distributeTextFlow({ targets: rows, inputs: {}, sourceName: 'text1', value: 'a'.repeat(40) }),
+    );
+    expect(ascii.inputs.text1).toHaveLength(40);
+    expect(ascii.changes).toHaveLength(1);
+    const longAscii = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1',
+        value: 'a'.repeat(100),
+      }),
+    );
+    expect(rows.slice(0, 3).map(({ name }) => longAscii.inputs[name].length)).toEqual([40, 40, 20]);
+  });
+
+  test('mixed newline styles and empty lines split by each destination limit without trimming spaces', () => {
+    const result = successful(
+      distributeTextFlow({
+        targets: targets(2, 1, 3, 2, 2),
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえお\r\n\r\n  \rか\n',
+      }),
+    );
+    expect(Object.values(result.inputs)).toEqual(['あい', 'う', 'えお', '  ', 'か']);
+  });
+
+  test('starts at clicked row and keeps later paragraphs separate while pushing them', () => {
+    const before = Object.freeze({
+      'text1-2': '先',
+      'text2-2': '',
+      'text3-2': '次',
+      'text4-2': '後',
+      other: 'kept',
+    });
+    const result = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2, 2, 2),
+        inputs: before,
+        sourceName: 'text2-2',
+        value: 'あいう',
+      }),
+    );
+    expect(result.inputs).toEqual({
+      ...before,
+      'text2-2': 'あい',
+      'text3-2': 'う',
+      'text4-2': '次',
+      'text5-2': '後',
+    });
+    expect(before['text3-2']).toBe('次');
+  });
+
+  test('single-row edit preserves later positions, including gaps', () => {
+    const input = { 'text1-2': 'あ', 'text2-2': '', 'text3-2': '後', extra: 'kept' };
+    const result = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: 'いう',
+      }),
+    );
+    expect(result.inputs).toEqual({ ...input, 'text1-2': 'いう' });
+    expect(result.changes).toEqual([{ name: 'text1-2', value: 'いう' }]);
+  });
+
+  test('existing normal paragraph re-splits using destination cap, returning only displaced tail', () => {
+    const result = successful(
+      distributeTextFlow({
+        targets: targets(2, 3, 1),
+        inputs: { 'text1-2': '', 'text2-3': 'えおか', other: 'kept' },
+        sourceName: 'text1-2',
+        value: 'あいう',
+        legacyNames: [],
+      }),
+    );
+    expect(result.inputs['text3-1']).toBe('え');
+    expect(result.discarded).toEqual([{ name: 'text2-3', value: 'おか' }]);
+    expect(result.inputs.other).toBe('kept');
+  });
+
+  test('new source overflow rejects the entire proposal without mutation', () => {
+    const input = Object.freeze({ 'text1-1': '旧', 'text2-1': '次' });
+    expect(
+      distributeTextFlow({
+        targets: targets(1, 1),
+        inputs: input,
+        sourceName: 'text1-1',
+        value: 'あいう',
+      }),
+    ).toEqual({ ok: false, reason: 'source-overflow' });
+    expect(input).toEqual({ 'text1-1': '旧', 'text2-1': '次' });
+  });
+
+  test('shortening does not pull rows up, but emptying source pulls whole following rows', () => {
+    const input = { 'text1-2': 'あい', 'text2-2': 'う', 'text3-2': '', 'text4-2': 'え' };
+    const short = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: 'あ',
+      }),
+    );
+    expect(short.inputs['text2-2']).toBe('う');
+    const deleted = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: '',
+      }),
+    );
+    expect(deleted.inputs).toEqual({
+      'text1-2': 'う',
+      'text2-2': 'え',
+      'text3-2': '',
+      'text4-2': '',
+    });
+    expect(deleted.selection).toEqual({ name: 'text1-2', anchor: 0, focus: 0 });
+  });
+
+  test('explicit deletion compacts an already blank continuation while empty edit does not', () => {
+    const input = { 'text1-2': '', 'text2-2': '次' };
+    const idle = successful(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: '',
+      }),
+    );
+    expect(idle.inputs).toEqual(input);
+    const deleted = successful(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: '',
+        allowDeletionPullUp: true,
+      }),
+    );
+    expect(deleted.inputs).toEqual({ 'text1-2': '次', 'text2-2': '' });
+  });
+
+  test('live trailing newline reserves one continuation and moves existing row; paste does not', () => {
+    const input = { 'text1-2': 'あ', 'text2-2': '次', 'text3-2': '' };
+    const live = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: 'あ\n\n',
+        preferNextRow: true,
+      }),
+    );
+    expect(live.inputs).toEqual({ 'text1-2': 'あ', 'text2-2': '', 'text3-2': '次' });
+    expect(live.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+    const paste = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2),
+        inputs: input,
+        sourceName: 'text1-2',
+        value: 'あ\n',
+      }),
+    );
+    expect(paste.inputs).toEqual(input);
+    const empty = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2),
+        inputs: { ...input, 'text1-2': '' },
+        sourceName: 'text1-2',
+        value: '\n\n',
+        preferNextRow: true,
+      }),
+    );
+    expect(empty.inputs['text2-2']).toBe('次');
+    expect(empty.selection.name).toBe('text1-2');
+    expect(
+      distributeTextFlow({
+        targets: targets(2),
+        inputs: { 'text1-2': 'あ' },
+        sourceName: 'text1-2',
+        value: 'あ\n',
+        preferNextRow: true,
+      }),
+    ).toEqual({ ok: false, reason: 'source-overflow' });
+  });
+
+  test('maps UTF-16 caret position without splitting emoji and retains backward selection', () => {
+    const moved = successful(
+      distributeTextFlow({
+        targets: targets(1, 1),
+        inputs: {},
+        sourceName: 'text1-1',
+        value: 'あ😀',
+        selection: { anchor: 3, focus: 3 },
+      }),
+    );
+    expect(moved.selection).toEqual({ name: 'text2-1', anchor: 2, focus: 2 });
+    const selected = successful(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'AB',
+        selection: { anchor: 2, focus: 0 },
+      }),
+    );
+    expect(selected.selection).toEqual({ name: 'text1-2', anchor: 2, focus: 0 });
+  });
+
+  test('legacy source remains whole while edited; shifted legacy keeps flag and original text', () => {
+    const rows = targets(1, 2, 1, 2);
+    const input = { 'text1-1': '', 'text2-2': '古い\n長文', 'text3-1': '後' };
+    expect(getTextFlowLegacyNames(rows, input)).toEqual(['text2-2']);
+    const edited = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: input,
+        sourceName: 'text2-2',
+        value: 'さらに古い\n長文',
+      }),
+    );
+    expect(edited.inputs['text2-2']).toBe('さらに古い\n長文');
+    expect(edited.inputs['text3-1']).toBe('後');
+    const shifted = successful(
+      distributeTextFlow({ targets: rows, inputs: input, sourceName: 'text1-1', value: 'あいう' }),
+    );
+    expect(shifted.inputs['text3-1']).toBe('古い\n長文');
+    expect(shifted.legacyNames).toEqual(['text3-1']);
+    expect(shifted.inputs['text4-2']).toBe('後');
+    const shortened = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: shifted.inputs,
+        sourceName: 'text3-1',
+        value: '短',
+        legacyNames: shifted.legacyNames,
+      }),
+    );
+    expect(shortened.legacyNames).toContain('text3-1');
+  });
+});

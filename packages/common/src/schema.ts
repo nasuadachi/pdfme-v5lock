@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { TextFlowOptions } from './textFlow.js';
 
 const langs = ['en', 'zh', 'ja', 'ko', 'ar', 'th', 'pl', 'it', 'de', 'es', 'fr'] as const;
 
@@ -170,7 +171,22 @@ export const Plugin = z
   })
   .passthrough();
 
-export const CommonOptions = z.object({ font: Font.optional() }).passthrough();
+export const CommonOptions = z
+  .object({
+    font: Font.optional(),
+    textFlow: z
+      .object({
+        enabled: z.boolean(),
+        onBeforeDiscard: z
+          .custom<TextFlowOptions['onBeforeDiscard']>((value) => typeof value === 'function')
+          .optional(),
+        onNotice: z
+          .custom<TextFlowOptions['onNotice']>((value) => typeof value === 'function')
+          .optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
 
 const CommonProps = z.object({
   template: Template,

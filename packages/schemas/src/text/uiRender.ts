@@ -21,6 +21,9 @@ import {
   isFirefox,
 } from './helper.js';
 import { isEditable } from '../utils.js';
+import { bindTextFlowEditor } from './textFlowEditor.js';
+
+const textRenderVersions = new WeakMap<HTMLDivElement, number>();
 
 const replaceUnsupportedChars = (text: string, fontKitFont: FontKitFont): string => {
   const charSupportCache: { [char: string]: boolean } = {};
@@ -57,6 +60,12 @@ const replaceUnsupportedChars = (text: string, fontKitFont: FontKitFont): string
 };
 
 export const uiRender = async (arg: UIRenderProps<TextSchema>) => {
+  // Renderer may clean/reuse this root while the font is being loaded. A
+  // detached marker prevents an old async Text render from repopulating it.
+  const renderMarker = document.createComment('pdfme-text-render');
+  const renderVersion = (textRenderVersions.get(arg.rootElement) ?? 0) + 1;
+  textRenderVersions.set(arg.rootElement, renderVersion);
+  arg.rootElement.appendChild(renderMarker);
   const { value, schema, mode, onChange, stopEditing, tabIndex, placeholder, options, _cache } =
     arg;
   const usePlaceholder = isEditable(mode, schema) && placeholder && !value;
@@ -74,6 +83,11 @@ export const uiRender = async (arg: UIRenderProps<TextSchema>) => {
     font,
     _cache as Map<string, import('fontkit').Font>,
   );
+  if (
+    renderMarker.parentNode !== arg.rootElement ||
+    textRenderVersions.get(arg.rootElement) !== renderVersion
+  )
+    return;
   const textBlock = buildStyledTextContainer(
     arg,
     fontKitFont,
@@ -97,6 +111,36 @@ export const uiRender = async (arg: UIRenderProps<TextSchema>) => {
         };">${escaped}</span>`;
       })
       .join('');
+    return;
+  }
+
+  if (arg.textFlow && mode === 'form') {
+    // Keep the original PDF/preview font fitting on the committed bounded
+    // paragraph. Row distribution, rather than font fitting, limits its text.
+    textBlock.contentEditable = isFirefox() ? 'true' : 'plaintext-only';
+    textBlock.tabIndex = tabIndex || 0;
+    textBlock.textContent = value;
+    const refreshStyle = (content: string) => {
+      const size =
+        schema.dynamicFontSize && content
+          ? calculateDynamicFontSize({ textSchema: schema, fontKitFont, value: content })
+          : (schema.fontSize ?? DEFAULT_FONT_SIZE);
+      const { topAdj, bottomAdj } = getBrowserVerticalFontAdjustments(
+        fontKitFont,
+        size,
+        schema.lineHeight ?? DEFAULT_LINE_HEIGHT,
+        schema.verticalAlignment ?? DEFAULT_VERTICAL_ALIGNMENT,
+      );
+      textBlock.style.fontSize = `${size}pt`;
+      textBlock.style.paddingTop = `${topAdj}px`;
+      textBlock.style.marginBottom = `${bottomAdj}px`;
+      textBlock.style.color = schema.fontColor ?? DEFAULT_FONT_COLOR;
+      if (textBlock.parentElement) {
+        textBlock.parentElement.style.backgroundColor = getBackgroundColor(content, schema);
+      }
+    };
+    refreshStyle(value);
+    bindTextFlowEditor(textBlock, arg.textFlow, refreshStyle);
     return;
   }
 

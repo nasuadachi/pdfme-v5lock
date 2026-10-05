@@ -4,6 +4,41 @@ PdfMe 5.5.10からフォーク
 6系で私が必要と思われるパッチを当てていく  
 mac osのみテストしています
 
+## v5lock独自機能: 本文を次の入力欄へ送る（v5lock.10）
+
+識別名: `V5LOCK-CUSTOM-20261005-TEXT-FLOW`。これは本家v5のText/Formにはない、subkarteのノート・書類向けの追加機能です。バックポートではなく、このフォークで独自実装しています。詳細とAPI例は [TEXT_FLOW.md](TEXT_FLOW.md) を参照してください。
+
+| 項目 | 本家v5の動作 | v5lockの追加動作（有効化したFormのみ） |
+| --- | --- | --- |
+| 本文入力 | 各text欄を独立して編集し、基本的にblurで変更通知 | 入力・貼り付け・実際の改行を伴う音声入力を処理し、同じページ内の後続欄へ分配 |
+| 対象と順序 | 本文の段番号・上限という名前規則はない | `type: "text"` の編集可能な `textN` / `textN-上限` を数値の行番号順に使用。ゼロ埋めは保持 |
+| 上限 | dynamicFontSizeなどによる欄内の文字サイズ調整 | 未指定20、移動先の欄ごとの上限。ASCII・半角カナ0.5、全角・CJK・絵文字1。書記素の途中で切らない |
+| 改行と既存本文 | 一つの欄の中に保持 | 明示改行で段を分け、長い行をさらに分割。空行は詰め、後続の既存本文は下へ押し出す。空段の削除時は後続本文を繰り上げる |
+| 保存済みの長文 | 欄内で保持 | 読み込み時に上限超過・改行入りだった本文は、編集後も分割せず保持 |
+| 旧項目名の保存データ | 完全な項目名のキーを参照 | 現在キーが無い場合だけ、末尾の上限を除いた旧キーを補完。現在キーの空文字を優先し、旧キーや対象外の値も保持 |
+| 複数欄の更新 | setInputsによる再描画 | 入力DOMを保持して一括確定し、その後にonChangeInputを通知。IME確定まで分配・フォーカス移動を待つ |
+| 容量超過 | 段間分配なし | 新しい入力自体が収まらなければ全体を取消。既存末尾の破棄は操作前の永続保存が成功した場合だけ許可。失敗時は本文を戻す |
+
+### 有効化・保存・PDF出力
+
+- `options.textFlow.enabled: true` で有効化。新しいschema.typeやテンプレート属性への移行は不要です。無効なFormと対象外の欄は従来の入力経路を使います。
+- 日付・担当者などは移動せず、本文だけを移動します。ページをまたがず、そのページの最後の対象欄で容量を判定します。
+- `onBeforeDiscard` は操作前の固定snapshotを受け取り、永続保存の成功後に完了します。保存待ち中の暫定本文と公開入力値を分離し、後続入力を順番に確定します。保存失敗時は待機中の本文操作を取り消し、独立した対象外欄の編集は保持します。
+- `Form.whenInputsSettled()` を追加しました。通常の保存・PDF出力・画面離脱はこれを待ってから入力値を取得します。押し出し前の保存hook自身は待機せず、渡されたsnapshotを保存します。
+- 本文のUndo/Redoは複数段を一つの操作として扱います。通知用の `onNotice` も追加しています。
+- 旧キー補完はForm/Viewerの読み込みとGeneratorの必須項目検査前に共通適用します。Generatorでも `options.textFlow.enabled: true` を指定します。保存・PDF生成には現在の項目名を使います。
+
+### 主な独自実装の場所とupstream取り込み時の注意
+
+- Common: `packages/common/src/textFlow.ts`（名前判定、幅計算、互換読み込み、純粋な分配計算、追加API型）
+- Text: `packages/schemas/src/text/textFlowEditor.ts`、`text/uiRender.ts`（contenteditableのinput/paste/IME/選択範囲と入力DOM保持）
+- UI: `packages/ui/src/textFlow.ts`、`Form.tsx`、`class.ts`、`components/Preview.tsx`、`components/Renderer.tsx`（一括更新、保存待ち・取消、カーソル、Undo/Redo）
+- Generator: `packages/generator/src/generate.ts`（旧キー補完を必須項目検査・PDF描画前に適用）
+
+upstream更新時はこれらを独自機能として維持し、[TEXT_FLOW.md](TEXT_FLOW.md) の仕様とcommon/schemas/ui/generatorのtextFlow回帰テストを確認してください。subkarte側の有効化、通知、履歴付き保存との連携も必要です。iPad Safariの日本語変換・音声入力の継続・キーボード保持は実機検証が必要です。
+
+v5lockのtarballはnpmに公開せず、7パッケージを同じ版でビルドし、GitHub Releaseのアセットとして提供します。`v5lock.10` は準備版で、公開とアプリの参照切替は別途実施します。
+
 ## v5固有差分をupstreamからマージするときの確認事項
 
 v5lock固有のバックポートには、コード内に `V5LOCK-BACKPORT-...` 形式の識別子を付けています。

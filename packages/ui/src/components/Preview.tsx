@@ -19,6 +19,7 @@ import { useUIPreProcessor, useScrollPageCursor } from '../hooks.js';
 import { FontContext, OptionsContext } from '../contexts.js';
 import { template2SchemasList, getPagesScrollTopByIndex, useMaxZoom } from '../helper.js';
 import { theme } from 'antd';
+import type { TextFlowController } from '../textFlow.js';
 
 const _cache = new Map<string | number, unknown>();
 
@@ -28,10 +29,12 @@ const Preview = ({
   size,
   onChangeInput,
   onPageChange,
+  textFlowController,
 }: Omit<PreviewProps, 'domContainer'> & {
   onChangeInput?: (args: { index: number; value: string; name: string }) => void;
   onPageChange?: (pageInfo: { currentPage: number; totalPages: number }) => void;
   size: Size;
+  textFlowController?: TextFlowController;
 }) => {
   const { token } = theme.useToken();
 
@@ -200,6 +203,15 @@ const Preview = ({
                 schema={schema}
                 basePdf={template.basePdf}
                 value={value}
+                textFlow={
+                  isForm
+                    ? textFlowController?.getBinding(
+                        unitCursor,
+                        schemasList.findIndex((page) => page.some((item) => item.id === schema.id)),
+                        schema,
+                      )
+                    : undefined
+                }
                 mode={isForm ? 'form' : 'viewer'}
                 placeholder={schema.content}
                 tabIndex={index + 100}
