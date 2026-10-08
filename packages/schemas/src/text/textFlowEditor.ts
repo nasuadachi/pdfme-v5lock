@@ -24,6 +24,10 @@ const readTextFlowContent = (root: Node, endpoint?: { node: Node; offset: number
       return;
     }
     if (element.tagName === 'BR') {
+      // Safari plaintext-only editors append a final BR for the caret after
+      // Enter. The preceding BR is the actual newline; this one is a filler.
+      if (node.nextSibling === null && (node.previousSibling as Element)?.tagName === 'BR')
+        return;
       text += '\n';
       return;
     }

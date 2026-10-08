@@ -98,6 +98,35 @@ describe('flowing Text native editor', () => {
     );
   });
 
+  it('ignores the Safari trailing BR filler after Enter and inserts a blank row', () => {
+    element.innerHTML = 'だけです。<br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 2, element, 2);
+    expect(readTextFlowText(element)).toBe('だけです。\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 6, focus: 6 });
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです。\n',
+        selection: { anchor: 6, focus: 6 },
+        preferNextRow: true,
+      }),
+    );
+
+    element.innerHTML = 'だけです。<br><br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 3, element, 3);
+    expect(readTextFlowText(element)).toBe('だけです。\n\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 7, focus: 7 });
+
+    element.innerHTML = '<br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 1, element, 1);
+    expect(readTextFlowText(element)).toBe('\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 1, focus: 1 });
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
+    expect(commitEdit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: '\n', preferNextRow: true }),
+    );
+  });
+
   it('does not split or move focus during IME and commits once after final input', async () => {
     element.textContent = '前';
     setTextFlowSelection(element, { anchor: 1, focus: 1 });

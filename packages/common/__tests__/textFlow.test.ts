@@ -748,7 +748,7 @@ describe('transactional row distribution', () => {
     expect(deleted.inputs).toEqual({ 'text1-2': '次', 'text2-2': '' });
   });
 
-  test('live trailing newline reserves one continuation and moves existing row; paste does not', () => {
+  test('live trailing newline reserves one continuation even in an empty row; paste does not', () => {
     const input = { 'text1-2': 'あ', 'text2-2': '次', 'text3-2': '' };
     const live = successful(
       distributeTextFlow({
@@ -779,14 +779,77 @@ describe('transactional row distribution', () => {
         preferNextRow: true,
       }),
     );
-    expect(empty.inputs['text2-2']).toBe('次');
-    expect(empty.selection.name).toBe('text1-2');
+    expect(empty.inputs).toEqual({ 'text1-2': '', 'text2-2': '', 'text3-2': '次' });
+    expect(empty.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
     expect(
       distributeTextFlow({
         targets: targets(2),
         inputs: { 'text1-2': 'あ' },
         sourceName: 'text1-2',
         value: 'あ\n',
+        preferNextRow: true,
+      }),
+    ).toEqual({ ok: false, reason: 'source-overflow' });
+  });
+
+  test('repeated Enter in an inserted blank row shifts all later rows, including existing blanks', () => {
+    const rows = targets(2, 2, 2, 2, 2);
+    const initial = {
+      'text1-2': 'あ',
+      'text2-2': '次',
+      'text3-2': '',
+      'text4-2': '甲',
+      'text5-2': '乙',
+    };
+    const first = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: initial,
+        sourceName: 'text1-2',
+        value: 'あ\n',
+        selection: { anchor: 2, focus: 2 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(first.inputs)).toEqual({
+      'text1-2': 'あ',
+      'text2-2': '',
+      'text3-2': '次',
+      'text4-2': '',
+      'text5-2': '甲',
+    });
+    expect(first.discarded).toEqual([{ name: 'text5-2', value: '乙' }]);
+    expect(first.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+
+    const second = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: first.inputs,
+        sourceName: 'text2-2',
+        value: '\n',
+        selection: { anchor: 1, focus: 1 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(second.inputs)).toEqual({
+      'text1-2': 'あ',
+      'text2-2': '',
+      'text3-2': '',
+      'text4-2': '次',
+      'text5-2': '',
+    });
+    expect(second.discarded).toEqual([{ name: 'text5-2', value: '甲' }]);
+    expect(second.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter on the final empty row reports overflow without changing any rows', () => {
+    expect(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: { 'text1-2': '前', 'text2-2': '' },
+        sourceName: 'text2-2',
+        value: '\n',
+        selection: { anchor: 1, focus: 1 },
         preferNextRow: true,
       }),
     ).toEqual({ ok: false, reason: 'source-overflow' });

@@ -402,7 +402,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   // In particular, a saved automatic continuation must become a displaced
   // paragraph rather than being appended after the newline and filling that row.
   const insertBlankAfterSource =
-    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value) && /[^\r\n]/.test(value);
+    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value);
   let sourceEndIndex = sourceIndex;
   if (joinedEndIndex !== undefined) {
     sourceEndIndex = joinedEndIndex;
@@ -432,6 +432,11 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
     return { ok: false, reason: 'source-overflow' };
   const sourceChunks = sourceLayout.chunks;
+  // An explicit Enter in an empty row still occupies that row. Reserve the
+  // next row for the caret and shift every existing row below it.
+  if (insertBlankAfterSource && sourceChunks.length === 0) {
+    sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
+  }
   // Deleting the only grapheme before an empty row leaves the preceding row
   // empty. Keep that row while closing the current one and pulling later rows up.
   if (deletingFromEmptyRow && sourceChunks.length === 0) {
@@ -475,7 +480,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     for (let index = sourceEndIndex + 1; index < targets.length; index++) {
       const name = targets[index].name;
       let paragraph = inputs[name] || '';
-      if (!paragraph) continue;
+      if (!paragraph && !insertBlankAfterSource) continue;
       const isLegacy = legacy.has(name);
       if (!isLegacy) {
         while (
@@ -514,7 +519,11 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     }
     for (const paragraph of paragraphs) {
       if (!targets[nextIndex]) {
-        discarded.push({ name: paragraph.name, value: paragraph.value });
+        if (paragraph.value) discarded.push({ name: paragraph.name, value: paragraph.value });
+        continue;
+      }
+      if (!paragraph.value) {
+        nextIndex++;
         continue;
       }
       const layout = paragraph.legacy
