@@ -18,6 +18,13 @@ const successful = (result: TextFlowDistribution) => {
   if (!result.ok) throw Error(result.reason);
   return result;
 };
+const softBreaksKey = '__pdfme_text_flow_soft_after';
+const bodyInputs = (inputs: Record<string, string>) => {
+  const { [softBreaksKey]: _softBreaks, ...body } = inputs;
+  return body;
+};
+const softAfter = (inputs: Record<string, string>): number[] =>
+  Object.values(JSON.parse(inputs[softBreaksKey] || '{}') as Record<string, number[]>).flat();
 const page = (names: string[]): Schema[] =>
   names.map((name) => ({
     name,
@@ -147,7 +154,7 @@ describe('fullwidth equivalents and grapheme safety', () => {
           value: '👨‍👩‍👧‍👦🇯🇵か\u3099',
         }),
       );
-      expect(Object.values(result.inputs)).toEqual(['👨‍👩‍👧‍👦', '🇯🇵', 'か\u3099']);
+      expect(Object.values(bodyInputs(result.inputs))).toEqual(['👨‍👩‍👧‍👦', '🇯🇵', 'か\u3099']);
     } finally {
       if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
       else Reflect.deleteProperty(Intl, 'Segmenter');
@@ -196,7 +203,7 @@ describe('transactional row distribution', () => {
         value: 'あいうえお\r\n\r\n  \rか\n',
       }),
     );
-    expect(Object.values(result.inputs)).toEqual(['あい', 'う', 'えお', '  ', 'か']);
+    expect(Object.values(bodyInputs(result.inputs))).toEqual(['あい', 'う', 'えお', '  ', 'か']);
   });
 
   test('starts at clicked row and keeps later paragraphs separate while pushing them', () => {
@@ -215,7 +222,7 @@ describe('transactional row distribution', () => {
         value: 'あいう',
       }),
     );
-    expect(result.inputs).toEqual({
+    expect(bodyInputs(result.inputs)).toEqual({
       ...before,
       'text2-2': 'あい',
       'text3-2': 'う',
@@ -223,6 +230,429 @@ describe('transactional row distribution', () => {
       'text5-2': '後',
     });
     expect(before['text3-2']).toBe('次');
+  });
+
+  test('saved rows without wrap metadata remain separate paragraphs', () => {
+    const edited = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2),
+        inputs: { 'text1-2': 'あい', 'text2-2': 'うえ' },
+        sourceName: 'text1-2',
+        value: 'かあい',
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-2': 'かあ',
+      'text2-2': 'い',
+      'text3-2': 'うえ',
+    });
+    expect(softAfter(edited.inputs)).toEqual([0]);
+  });
+
+  test('Backspace at the start of a saved second row deletes the previous grapheme and joins it', () => {
+    const before = { 'text1-4': '甲乙丙欄', 'text2-4': 'だけです', 'text3-4': '' };
+    const joined = successful(
+      distributeTextFlow({
+        targets: targets(4, 4, 4),
+        inputs: before,
+        sourceName: 'text2-4',
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-4': '甲乙丙だ',
+      'text2-4': 'けです',
+      'text3-4': '',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0]);
+    expect(joined.selection).toEqual({ name: 'text1-4', anchor: 3, focus: 3 });
+    expect(before).toEqual({ 'text1-4': '甲乙丙欄', 'text2-4': 'だけです', 'text3-4': '' });
+  });
+
+  test('Backspace on a blank row deletes the preceding final grapheme and closes the blank row', () => {
+    const before = {
+      'text1-4': '甲乙丙欄',
+      'text2-4': '',
+      'text3-4': 'だけです',
+      'text4-4': '後',
+    };
+    const edited = successful(
+      distributeTextFlow({
+        targets: targets(4, 4, 4, 4),
+        inputs: before,
+        sourceName: 'text2-4',
+        value: '',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-4': '甲乙丙',
+      'text2-4': 'だけです',
+      'text3-4': '後',
+      'text4-4': '',
+    });
+    expect(softAfter(edited.inputs)).toEqual([]);
+    expect(edited.selection).toEqual({ name: 'text1-4', anchor: 3, focus: 3 });
+    expect(before['text1-4']).toBe('甲乙丙欄');
+  });
+
+  test.each(['欄', '👨‍👩‍👧‍👦'])(
+    'Backspace after the sole preceding grapheme %s keeps that row empty',
+    (previous) => {
+      const edited = successful(
+        distributeTextFlow({
+          targets: targets(4, 4, 4, 4),
+          inputs: { 'text1-4': previous, 'text2-4': '', 'text3-4': '次', 'text4-4': '後' },
+          sourceName: 'text2-4',
+          value: '',
+          selection: { anchor: 0, focus: 0 },
+          deleteBackwardAtStart: true,
+        }),
+      );
+      expect(bodyInputs(edited.inputs)).toEqual({
+        'text1-4': '',
+        'text2-4': '次',
+        'text3-4': '後',
+        'text4-4': '',
+      });
+      expect(edited.selection).toEqual({ name: 'text1-4', anchor: 0, focus: 0 });
+    },
+  );
+
+  test('Backspace on a blank row shortens a preceding soft paragraph', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const edited = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { ...created.inputs, 'text3-2': '', 'text4-2': '後' },
+        sourceName: 'text3-2',
+        value: '',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'う',
+      'text3-2': '後',
+      'text4-2': '',
+    });
+    expect(softAfter(edited.inputs)).toEqual([0]);
+    expect(edited.selection).toEqual({ name: 'text2-2', anchor: 1, focus: 1 });
+  });
+
+  test('Backspace joins an automatic continuation and deletes one whole emoji grapheme', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あ👨‍👩‍👧‍👦だけ',
+      }),
+    );
+    expect(bodyInputs(created.inputs)).toEqual({
+      'text1-2': 'あ👨‍👩‍👧‍👦',
+      'text2-2': 'だけ',
+      'text3-2': '',
+    });
+    const joined = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text2-2',
+        value: 'だけ',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-2': 'あだ',
+      'text2-2': 'け',
+      'text3-2': '',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0]);
+    expect(joined.selection).toEqual({ name: 'text1-2', anchor: 1, focus: 1 });
+  });
+
+  test('Backspace joins the preceding soft paragraph and the current soft continuation', () => {
+    const rows = targets(2, 2, 2, 2);
+    const first = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const second = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: first.inputs,
+        sourceName: 'text3-2',
+        value: 'だけです',
+      }),
+    );
+    expect(bodyInputs(second.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うえ',
+      'text3-2': 'だけ',
+      'text4-2': 'です',
+    });
+    expect(softAfter(second.inputs)).toEqual([0, 2]);
+    const joined = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: second.inputs,
+        sourceName: 'text3-2',
+        value: 'だけ',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うだ',
+      'text3-2': 'けで',
+      'text4-2': 'す',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0, 1, 2]);
+    expect(joined.selection).toEqual({ name: 'text2-2', anchor: 1, focus: 1 });
+  });
+
+  test('Backspace keeps a joined legacy value whole, including its newline', () => {
+    const joined = successful(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: { 'text1-2': '旧\n欄', 'text2-2': 'だけ' },
+        sourceName: 'text2-2',
+        value: 'だけ',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(joined.inputs).toEqual({ 'text1-2': '旧\nだけ', 'text2-2': '' });
+    expect(joined.legacyNames).toContain('text1-2');
+    expect(joined.selection).toEqual({ name: 'text1-2', anchor: 2, focus: 2 });
+  });
+
+  test('insertion and deletion reflow only automatic continuation rows after reload', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    expect(softAfter(created.inputs)).toEqual([0]);
+    const inserted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text1-2',
+        value: 'かあい',
+      }),
+    );
+    expect(bodyInputs(inserted.inputs)).toEqual({
+      'text1-2': 'かあ',
+      'text2-2': 'いう',
+      'text3-2': 'え',
+    });
+    expect(softAfter(inserted.inputs)).toEqual([0, 1]);
+    const deleted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: inserted.inputs,
+        sourceName: 'text1-2',
+        value: 'あ',
+      }),
+    );
+    expect(bodyInputs(deleted.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うえ',
+      'text3-2': '',
+    });
+    expect(softAfter(deleted.inputs)).toEqual([0]);
+  });
+
+  test('explicit newline remains a hard boundary even when the preceding row is full', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あい\nうえ',
+      }),
+    );
+    expect(softAfter(created.inputs)).toEqual([]);
+    const inserted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text1-2',
+        value: 'かあい',
+      }),
+    );
+    expect(bodyInputs(inserted.inputs)).toEqual({
+      'text1-2': 'かあ',
+      'text2-2': 'い',
+      'text3-2': 'うえ',
+    });
+    expect(softAfter(inserted.inputs)).toEqual([0]);
+  });
+
+  test('Enter after a soft-wrapped row inserts a blank before its saved continuation', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text1-2',
+        value: 'あい\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': '',
+      'text3-2': 'うえ',
+    });
+    expect(softAfter(split.inputs)).toEqual([]);
+    expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter in the middle of a soft-wrapped paragraph preserves the earlier soft break', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえおか',
+      }),
+    );
+    expect(softAfter(created.inputs)).toEqual([0, 1]);
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text2-2',
+        value: 'うえ\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うえ',
+      'text3-2': '',
+      'text4-2': 'おか',
+    });
+    expect(softAfter(split.inputs)).toEqual([0]);
+    expect(split.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter shifts a saved soft continuation and later rows, discarding only the final tail', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { ...created.inputs, 'text3-2': '甲', 'text4-2': '乙' },
+        sourceName: 'text1-2',
+        value: 'あい\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': '',
+      'text3-2': 'うえ',
+      'text4-2': '甲',
+    });
+    expect(split.discarded).toEqual([{ name: 'text4-2', value: '乙' }]);
+    expect(softAfter(split.inputs)).toEqual([]);
+    expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+  });
+
+  test('a newline at the start of an automatic continuation makes that boundary hard', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text2-2',
+        value: '\nうえ',
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うえ',
+      'text3-2': '',
+    });
+    expect(softAfter(split.inputs)).toEqual([]);
+  });
+
+  test('presave is required before an edit discards an automatic continuation tail', () => {
+    const rows = targets(2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const inserted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text1-2',
+        value: 'かあい',
+      }),
+    );
+    expect(bodyInputs(inserted.inputs)).toEqual({ 'text1-2': 'かあ', 'text2-2': 'いう' });
+    expect(inserted.discarded).toEqual([{ name: 'text2-2', value: 'え' }]);
+    expect(softAfter(inserted.inputs)).toEqual([0]);
   });
 
   test('single-row edit preserves later positions, including gaps', () => {
@@ -318,7 +748,7 @@ describe('transactional row distribution', () => {
     expect(deleted.inputs).toEqual({ 'text1-2': '次', 'text2-2': '' });
   });
 
-  test('live trailing newline reserves one continuation and moves existing row; paste does not', () => {
+  test('live trailing newline reserves one continuation even in an empty row; paste does not', () => {
     const input = { 'text1-2': 'あ', 'text2-2': '次', 'text3-2': '' };
     const live = successful(
       distributeTextFlow({
@@ -349,14 +779,77 @@ describe('transactional row distribution', () => {
         preferNextRow: true,
       }),
     );
-    expect(empty.inputs['text2-2']).toBe('次');
-    expect(empty.selection.name).toBe('text1-2');
+    expect(empty.inputs).toEqual({ 'text1-2': '', 'text2-2': '', 'text3-2': '次' });
+    expect(empty.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
     expect(
       distributeTextFlow({
         targets: targets(2),
         inputs: { 'text1-2': 'あ' },
         sourceName: 'text1-2',
         value: 'あ\n',
+        preferNextRow: true,
+      }),
+    ).toEqual({ ok: false, reason: 'source-overflow' });
+  });
+
+  test('repeated Enter in an inserted blank row shifts all later rows, including existing blanks', () => {
+    const rows = targets(2, 2, 2, 2, 2);
+    const initial = {
+      'text1-2': 'あ',
+      'text2-2': '次',
+      'text3-2': '',
+      'text4-2': '甲',
+      'text5-2': '乙',
+    };
+    const first = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: initial,
+        sourceName: 'text1-2',
+        value: 'あ\n',
+        selection: { anchor: 2, focus: 2 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(first.inputs)).toEqual({
+      'text1-2': 'あ',
+      'text2-2': '',
+      'text3-2': '次',
+      'text4-2': '',
+      'text5-2': '甲',
+    });
+    expect(first.discarded).toEqual([{ name: 'text5-2', value: '乙' }]);
+    expect(first.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+
+    const second = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: first.inputs,
+        sourceName: 'text2-2',
+        value: '\n',
+        selection: { anchor: 1, focus: 1 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(second.inputs)).toEqual({
+      'text1-2': 'あ',
+      'text2-2': '',
+      'text3-2': '',
+      'text4-2': '次',
+      'text5-2': '',
+    });
+    expect(second.discarded).toEqual([{ name: 'text5-2', value: '甲' }]);
+    expect(second.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter on the final empty row reports overflow without changing any rows', () => {
+    expect(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: { 'text1-2': '前', 'text2-2': '' },
+        sourceName: 'text2-2',
+        value: '\n',
+        selection: { anchor: 1, focus: 1 },
         preferNextRow: true,
       }),
     ).toEqual({ ok: false, reason: 'source-overflow' });

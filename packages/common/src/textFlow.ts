@@ -43,6 +43,8 @@ export type TextFlowEdit = {
   inputType?: string;
   preferNextRow?: boolean;
   allowDeletionPullUp?: boolean;
+  /** Backspace at a row start deletes the preceding row's last grapheme and joins the rows. */
+  deleteBackwardAtStart?: boolean;
 };
 export type TextFlowEditor = {
   element?: HTMLElement;
@@ -205,6 +207,29 @@ export const getTextFlowLegacyNames = (
 
 type Chunk = { value: string; start: number; end: number; targetIndex: number; legacy: boolean };
 
+/** Saved with the input values so an automatic wrap stays distinguishable from an explicit row break. */
+const softBreaksKey = '__pdfme_text_flow_soft_after';
+
+type SavedSoftBreaks = Record<string, number[]>;
+
+const readSoftBreaks = (inputs: Readonly<Record<string, string>>): SavedSoftBreaks => {
+  try {
+    const parsed: unknown = JSON.parse(inputs[softBreaksKey] || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, number[]] =>
+          Array.isArray(entry[1]) && entry[1].every(Number.isSafeInteger),
+      ),
+    );
+  } catch {
+    return {};
+  }
+};
+
+const softBreakPageKey = (targets: ReadonlyArray<TextFlowTarget>) =>
+  JSON.stringify(targets.map(({ name, maxLength }) => [name, maxLength]));
+
 /** Newline offsets are retained for caret mapping, while truly empty lines are omitted. */
 const layoutValue = (
   value: string,
@@ -262,6 +287,7 @@ export type DistributeTextFlowArgs = {
   legacyNames?: ReadonlyArray<string>;
   preferNextRow?: boolean;
   allowDeletionPullUp?: boolean;
+  deleteBackwardAtStart?: boolean;
 };
 export type TextFlowDistribution =
   | { ok: false; reason: 'source-overflow' | 'invalid-source' | 'invalid-configuration' }
@@ -307,7 +333,8 @@ const mapSelection = (
 
 /** Compute the whole transaction without mutating inputs; the caller must authorize discarded tails. */
 export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistribution => {
-  const { inputs, sourceName, value } = args;
+  const { inputs } = args;
+  let { sourceName, value } = args;
   const targets = [...args.targets].sort((a, b) => a.row - b.row);
   if (
     new Set(targets.map(({ row }) => row)).size !== targets.length ||
@@ -321,21 +348,106 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   ) {
     return { ok: false, reason: 'invalid-configuration' };
   }
-  const sourceIndex = targets.findIndex(({ name }) => name === sourceName);
+  let sourceIndex = targets.findIndex(({ name }) => name === sourceName);
   if (sourceIndex < 0) return { ok: false, reason: 'invalid-source' };
   const legacy = new Set(args.legacyNames ?? getTextFlowLegacyNames(targets, inputs));
+  const savedSoftBreaks = readSoftBreaks(inputs);
+  const pageKey = softBreakPageKey(targets);
+  const softBreaks = new Set(
+    (savedSoftBreaks[pageKey] ?? []).filter((index) => index >= 0 && index < targets.length - 1),
+  );
+  let selection = args.selection ?? { anchor: value.length, focus: value.length };
+  let joinedEndIndex: number | undefined;
+  const deletingFromEmptyRow = args.deleteBackwardAtStart && sourceIndex > 0 && value === '';
+  if (args.deleteBackwardAtStart && sourceIndex > 0) {
+    // A row boundary is normally hard unless it was created by automatic wrap.
+    // Backspace at the beginning explicitly removes that boundary and the last
+    // grapheme before it, even for older inputs without soft-break metadata.
+    const currentIndex = sourceIndex;
+    const currentIsLegacy = legacy.has(sourceName);
+    let previousStartIndex = currentIndex - 1;
+    while (
+      previousStartIndex > 0 &&
+      softBreaks.has(previousStartIndex - 1) &&
+      inputs[targets[previousStartIndex - 1].name] &&
+      !legacy.has(targets[previousStartIndex - 1].name)
+    )
+      previousStartIndex--;
+    joinedEndIndex = currentIndex;
+    while (
+      softBreaks.has(joinedEndIndex) &&
+      joinedEndIndex + 1 < targets.length &&
+      inputs[targets[joinedEndIndex + 1].name] &&
+      !legacy.has(targets[joinedEndIndex + 1].name)
+    )
+      joinedEndIndex++;
+    const prefix = targets
+      .slice(previousStartIndex, currentIndex)
+      .map(({ name }) => inputs[name] || '')
+      .join('');
+    const prefixGraphemes = getGraphemes(prefix);
+    const deletedPrefix = prefix.slice(0, prefixGraphemes.at(-1)?.start ?? prefix.length);
+    const suffix = targets
+      .slice(currentIndex + 1, joinedEndIndex + 1)
+      .map(({ name }) => inputs[name] || '')
+      .join('');
+    sourceIndex = previousStartIndex;
+    sourceName = targets[sourceIndex].name;
+    if (currentIsLegacy) legacy.add(sourceName);
+    value = deletedPrefix + value + suffix;
+    selection = { anchor: deletedPrefix.length, focus: deletedPrefix.length };
+  }
   const sourceIsLegacy = legacy.has(sourceName) && value !== '';
+  // A live newline at the end inserts an empty row before existing text below.
+  // In particular, a saved automatic continuation must become a displaced
+  // paragraph rather than being appended after the newline and filling that row.
+  const insertBlankAfterSource =
+    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value);
+  let sourceEndIndex = sourceIndex;
+  if (joinedEndIndex !== undefined) {
+    sourceEndIndex = joinedEndIndex;
+  } else if (!sourceIsLegacy && !insertBlankAfterSource) {
+    while (
+      softBreaks.has(sourceEndIndex) &&
+      sourceEndIndex + 1 < targets.length &&
+      inputs[targets[sourceEndIndex + 1].name] &&
+      !legacy.has(targets[sourceEndIndex + 1].name)
+    )
+      sourceEndIndex++;
+  }
+  const continuationValue =
+    joinedEndIndex === undefined
+      ? targets
+          .slice(sourceIndex + 1, sourceEndIndex + 1)
+          .map(({ name }) => inputs[name] || '')
+          .join('')
+      : '';
+  const sourceValue = value + continuationValue;
   const sourceLayout = sourceIsLegacy
     ? {
         chunks: [{ value, start: 0, end: value.length, targetIndex: sourceIndex, legacy: true }],
         overflowStart: undefined,
       }
-    : layoutValue(value, targets, sourceIndex);
-  if (sourceLayout.overflowStart !== undefined) return { ok: false, reason: 'source-overflow' };
+    : layoutValue(sourceValue, targets, sourceIndex);
+  if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
+    return { ok: false, reason: 'source-overflow' };
   const sourceChunks = sourceLayout.chunks;
-  const selection = args.selection ?? { anchor: value.length, focus: value.length };
+  // An explicit Enter in an empty row still occupies that row. Reserve the
+  // next row for the caret and shift every existing row below it.
+  if (insertBlankAfterSource && sourceChunks.length === 0) {
+    sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
+  }
+  // Deleting the only grapheme before an empty row leaves the preceding row
+  // empty. Keep that row while closing the current one and pulling later rows up.
+  if (deletingFromEmptyRow && sourceChunks.length === 0) {
+    sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
+  }
   const continuation =
-    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value) && sourceChunks.length > 0;
+    !sourceIsLegacy &&
+    !continuationValue &&
+    args.preferNextRow &&
+    /[\r\n]$/.test(value) &&
+    sourceChunks.length > 0;
   if (continuation) {
     const targetIndex = sourceIndex + sourceChunks.length;
     if (!targets[targetIndex]) return { ok: false, reason: 'source-overflow' };
@@ -354,27 +466,64 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   const result = { ...inputs };
   const discarded: TextFlowChangedValue[] = [];
 
-  if (sourceChunks.length <= 1 && !continuation && !pullUp) {
+  if (
+    sourceEndIndex === sourceIndex &&
+    sourceChunks.length <= 1 &&
+    !continuation &&
+    !pullUp &&
+    !(/^[\r\n]/.test(value) && softBreaks.has(sourceIndex - 1))
+  ) {
     result[sourceName] = sourceChunks[0]?.value ?? '';
     if (!sourceIsLegacy) legacy.delete(sourceName);
   } else {
-    const paragraphs = targets.slice(sourceIndex + 1).flatMap(({ name }) => {
-      const paragraph = inputs[name] || '';
-      return paragraph ? [{ name, value: paragraph, legacy: legacy.has(name) }] : [];
-    });
+    const paragraphs: { name: string; value: string; legacy: boolean }[] = [];
+    for (let index = sourceEndIndex + 1; index < targets.length; index++) {
+      const name = targets[index].name;
+      let paragraph = inputs[name] || '';
+      if (!paragraph && !insertBlankAfterSource) continue;
+      const isLegacy = legacy.has(name);
+      if (!isLegacy) {
+        while (
+          softBreaks.has(index) &&
+          index + 1 < targets.length &&
+          inputs[targets[index + 1].name] &&
+          !legacy.has(targets[index + 1].name)
+        )
+          paragraph += inputs[targets[++index].name];
+      }
+      paragraphs.push({ name, value: paragraph, legacy: isLegacy });
+    }
     for (const { name } of targets.slice(sourceIndex)) {
       result[name] = '';
       legacy.delete(name);
     }
-    for (const chunk of sourceChunks) {
-      const name = targets[chunk.targetIndex].name;
-      result[name] = chunk.value;
-      if (chunk.legacy) legacy.add(name);
-    }
+    const nextSoftBreaks = new Set([...softBreaks].filter((index) => index < sourceIndex));
+    if (/^[\r\n]/.test(value) || sourceChunks.length === 0) nextSoftBreaks.delete(sourceIndex - 1);
+    const place = (chunks: Chunk[]) => {
+      chunks.forEach((chunk, index) => {
+        const name = targets[chunk.targetIndex].name;
+        result[name] = chunk.value;
+        if (chunk.legacy) legacy.add(name);
+        const next = chunks[index + 1];
+        if (next?.value && next.start === chunk.end) nextSoftBreaks.add(chunk.targetIndex);
+      });
+    };
+    place(sourceChunks);
     let nextIndex = sourceIndex + sourceChunks.length;
+    if (sourceLayout.overflowStart !== undefined) {
+      discarded.push({
+        name: targets[sourceIndex + 1]?.name ?? sourceName,
+        value: sourceValue.slice(sourceLayout.overflowStart),
+      });
+      nextIndex = targets.length;
+    }
     for (const paragraph of paragraphs) {
       if (!targets[nextIndex]) {
-        discarded.push({ name: paragraph.name, value: paragraph.value });
+        if (paragraph.value) discarded.push({ name: paragraph.name, value: paragraph.value });
+        continue;
+      }
+      if (!paragraph.value) {
+        nextIndex++;
         continue;
       }
       const layout = paragraph.legacy
@@ -391,11 +540,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
             overflowStart: undefined,
           }
         : layoutValue(paragraph.value, targets, nextIndex);
-      for (const chunk of layout.chunks) {
-        const name = targets[chunk.targetIndex].name;
-        result[name] = chunk.value;
-        if (chunk.legacy) legacy.add(name);
-      }
+      place(layout.chunks);
       nextIndex += layout.chunks.length;
       if (layout.overflowStart !== undefined) {
         discarded.push({
@@ -405,12 +550,17 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
         nextIndex = targets.length;
       }
     }
+    if (nextSoftBreaks.size) savedSoftBreaks[pageKey] = [...nextSoftBreaks].sort((a, b) => a - b);
+    else delete savedSoftBreaks[pageKey];
+    if (Object.keys(savedSoftBreaks).length)
+      result[softBreaksKey] = JSON.stringify(savedSoftBreaks);
+    else delete result[softBreaksKey];
   }
   return {
     ok: true,
     inputs: result,
-    changes: targets.flatMap(({ name }) =>
-      result[name] !== inputs[name] ? [{ name, value: result[name] }] : [],
+    changes: [...targets.map(({ name }) => name), softBreaksKey].flatMap((name) =>
+      result[name] !== inputs[name] ? [{ name, value: result[name] ?? '' }] : [],
     ),
     discarded,
     selection: mapSelection(sourceChunks, targets, selection, sourceIndex),

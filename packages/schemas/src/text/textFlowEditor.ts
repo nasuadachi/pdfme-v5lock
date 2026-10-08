@@ -24,6 +24,10 @@ const readTextFlowContent = (root: Node, endpoint?: { node: Node; offset: number
       return;
     }
     if (element.tagName === 'BR') {
+      // Safari plaintext-only editors append a final BR for the caret after
+      // Enter. The preceding BR is the actual newline; this one is a filler.
+      if (node.nextSibling === null && (node.previousSibling as Element)?.tagName === 'BR')
+        return;
       text += '\n';
       return;
     }
@@ -118,6 +122,7 @@ export const bindTextFlowEditor = (
   let canonicalText = readTextFlowText(element);
   let compositionSelection = beforeSelection;
   let deferredValue: { value: string; selection?: TextFlowSelection; legacy: boolean } | undefined;
+  let ignoreBackwardBeforeInput = false;
 
   const updateValue = (value: string, selection?: TextFlowSelection, legacy = binding.isLegacy) => {
     if (composing || endingComposition) {
@@ -165,16 +170,39 @@ export const bindTextFlowEditor = (
       preferNextRow,
     });
   };
+  const deleteBackwardAtStart = (selection: TextFlowSelection) => {
+    const value = readTextFlowText(element);
+    void binding.commitEdit({
+      value,
+      selection,
+      beforeSelection: selection,
+      inputType: 'deleteContentBackward',
+      deleteBackwardAtStart: true,
+      allowDeletionPullUp: value === '' ? true : undefined,
+    });
+  };
   const beforeInput = (event: InputEvent) => {
     if (composing || event.isComposing) return;
+    if (event.inputType === 'deleteContentBackward' && ignoreBackwardBeforeInput) {
+      event.preventDefault();
+      return;
+    }
     beforeSelection = readTextFlowSelection(element);
     if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
       event.preventDefault();
       if (event.inputType === 'historyUndo') binding.undo?.();
       else binding.redo?.();
+    } else if (
+      event.inputType === 'deleteContentBackward' &&
+      beforeSelection.anchor === 0 &&
+      beforeSelection.focus === 0
+    ) {
+      // The previous row belongs to a different contenteditable, so the browser
+      // cannot delete its last character or emit a useful input event here.
+      event.preventDefault();
+      deleteBackwardAtStart(beforeSelection);
     } else if (event.inputType.startsWith('delete') && readTextFlowText(element) === '') {
-      // Empty contenteditables may fire beforeinput without a following input.
-      // Deleting a blank continuation still needs whole-row compaction.
+      // An empty editor may not emit input for other delete operations either.
       event.preventDefault();
       void binding.commitEdit({
         value: '',
@@ -230,7 +258,23 @@ export const bindTextFlowEditor = (
     commit('insertFromPaste', selection);
   };
   const keyDown = (event: KeyboardEvent) => {
-    if (composing || event.isComposing || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+    if (composing || event.isComposing) return;
+    if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const selection = readTextFlowSelection(element);
+      if (selection.anchor === 0 && selection.focus === 0) {
+        // Safari can send keydown without beforeinput when the caret is at the
+        // start of this editor. Handle the key intent before the native no-op.
+        event.preventDefault();
+        beforeSelection = selection;
+        ignoreBackwardBeforeInput = true;
+        queueMicrotask(() => {
+          ignoreBackwardBeforeInput = false;
+        });
+        deleteBackwardAtStart(selection);
+      }
+      return;
+    }
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
     if (event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) binding.redo?.();

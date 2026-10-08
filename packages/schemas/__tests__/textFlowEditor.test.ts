@@ -83,6 +83,50 @@ describe('flowing Text native editor', () => {
     );
   });
 
+  it('recognizes Enter at the end of a row as a blank continuation', () => {
+    element.innerHTML = 'だけです。<div><br></div>';
+    const blank = element.lastChild!;
+    window.getSelection()!.setBaseAndExtent(blank, 0, blank, 0);
+    expect(readTextFlowText(element)).toBe('だけです。\n');
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertParagraph' }));
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです。\n',
+        selection: { anchor: 6, focus: 6 },
+        preferNextRow: true,
+      }),
+    );
+  });
+
+  it('ignores the Safari trailing BR filler after Enter and inserts a blank row', () => {
+    element.innerHTML = 'だけです。<br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 2, element, 2);
+    expect(readTextFlowText(element)).toBe('だけです。\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 6, focus: 6 });
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです。\n',
+        selection: { anchor: 6, focus: 6 },
+        preferNextRow: true,
+      }),
+    );
+
+    element.innerHTML = 'だけです。<br><br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 3, element, 3);
+    expect(readTextFlowText(element)).toBe('だけです。\n\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 7, focus: 7 });
+
+    element.innerHTML = '<br><br>';
+    window.getSelection()!.setBaseAndExtent(element, 1, element, 1);
+    expect(readTextFlowText(element)).toBe('\n');
+    expect(readTextFlowSelection(element)).toEqual({ anchor: 1, focus: 1 });
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
+    expect(commitEdit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: '\n', preferNextRow: true }),
+    );
+  });
+
   it('does not split or move focus during IME and commits once after final input', async () => {
     element.textContent = '前';
     setTextFlowSelection(element, { anchor: 1, focus: 1 });
@@ -172,7 +216,7 @@ describe('flowing Text native editor', () => {
     expect(commitEdit).not.toHaveBeenCalled();
   });
 
-  it('compacts on deletion in an already blank editor even without a native input event', () => {
+  it('routes Backspace from a blank row even without a native input event', () => {
     const event = new InputEvent('beforeinput', {
       inputType: 'deleteContentBackward',
       cancelable: true,
@@ -184,7 +228,119 @@ describe('flowing Text native editor', () => {
         value: '',
         inputType: 'deleteContentBackward',
         allowDeletionPullUp: true,
+        deleteBackwardAtStart: true,
       }),
     );
+  });
+
+  it('still compacts a blank editor for other delete input types', () => {
+    const event = new InputEvent('beforeinput', {
+      inputType: 'deleteContentForward',
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: '',
+        allowDeletionPullUp: true,
+      }),
+    );
+    expect(commitEdit.mock.calls[0][0].deleteBackwardAtStart).toBeUndefined();
+  });
+
+  it('sends Backspace at a nonempty row start to the flow instead of native input', () => {
+    editor.setValue('だけです');
+    setTextFlowSelection(element, { anchor: 0, focus: 0 });
+    const event = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(element.textContent).toBe('だけです');
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+
+    commitEdit.mockClear();
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    const middle = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(middle);
+    expect(middle.defaultPrevented).toBe(false);
+    expect(commitEdit).not.toHaveBeenCalled();
+  });
+
+  it('handles row-start Backspace keydown without beforeinput and ignores a duplicate beforeinput', async () => {
+    editor.setValue('だけです');
+    window.getSelection()!.setBaseAndExtent(element.firstChild!, 0, element.firstChild!, 0);
+    const keydown = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(keydown);
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledTimes(1);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        inputType: 'deleteContentBackward',
+        deleteBackwardAtStart: true,
+      }),
+    );
+
+    const duplicate = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(duplicate);
+    expect(duplicate.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledTimes(1);
+
+    await Promise.resolve();
+    element.dispatchEvent(
+      new InputEvent('beforeinput', { inputType: 'deleteContentBackward', cancelable: true }),
+    );
+    expect(commitEdit).toHaveBeenCalledTimes(2);
+  });
+
+  it('handles Backspace keydown from an empty row', () => {
+    const keydown = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(keydown);
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: '',
+        deleteBackwardAtStart: true,
+        allowDeletionPullUp: true,
+      }),
+    );
+  });
+
+  it('keeps native Backspace for a mid-row caret, selected text, or active IME', () => {
+    editor.setValue('だけです');
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    const middle = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(middle);
+    expect(middle.defaultPrevented).toBe(false);
+
+    setTextFlowSelection(element, { anchor: 0, focus: 1 });
+    const selected = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(selected);
+    expect(selected.defaultPrevented).toBe(false);
+
+    setTextFlowSelection(element, { anchor: 0, focus: 0 });
+    element.dispatchEvent(new CompositionEvent('compositionstart'));
+    const composing = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(commitEdit).not.toHaveBeenCalled();
   });
 });
