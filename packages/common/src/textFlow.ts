@@ -57,6 +57,9 @@ export type TextFlowBinding = {
   isLegacy: boolean;
   registerEditor(editor: TextFlowEditor): () => void;
   commitEdit(edit: TextFlowEdit): void | Promise<void>;
+  /** Move between text rows on the same displayed page without editing their values. */
+  moveCaretVertically?: (direction: 'up' | 'down', selection: TextFlowSelection) => boolean;
+  clearVerticalNavigation?: () => void;
   undo?(): void;
   redo?(): void;
 };
@@ -192,6 +195,24 @@ const getGraphemes = (value: string, start = 0): Grapheme[] => {
 /** Fullwidth equivalents: ASCII/halfwidth kana are 0.5, CJK/emoji are 1. */
 export const countTextFlowWidth = (value: string): number =>
   getGraphemes(value).reduce((width, grapheme) => width + grapheme.width, 0);
+
+export const getTextFlowCaretOffsets = (value: string): number[] => [
+  0,
+  ...getGraphemes(value).map(({ end }) => end),
+];
+
+/** Return a safe caret boundary nearest to a fullwidth-equivalent column. */
+export const getTextFlowOffsetAtWidth = (value: string, wantedWidth: number): number => {
+  let width = 0;
+  for (const grapheme of getGraphemes(value)) {
+    const nextWidth = width + grapheme.width;
+    if (wantedWidth < nextWidth) {
+      return wantedWidth - width < nextWidth - wantedWidth ? grapheme.start : grapheme.end;
+    }
+    width = nextWidth;
+  }
+  return value.length;
+};
 
 export const getTextFlowLegacyNames = (
   targets: ReadonlyArray<TextFlowTarget>,

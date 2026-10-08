@@ -114,6 +114,66 @@ export const setTextFlowSelection = (element: HTMLElement, position: TextFlowSel
   selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
 };
 
+/** Leave a wrapped editor only from its first or last visible line. */
+const isAtVerticalEdge = (
+  element: HTMLElement,
+  direction: 'up' | 'down',
+  selection: TextFlowSelection,
+): boolean => {
+  const value = readTextFlowText(element);
+  // Native movement stays inside saved multiline fields and transient Enter DOM.
+  if (
+    direction === 'up'
+      ? value.slice(0, selection.focus).includes('\n')
+      : value.slice(selection.focus).includes('\n')
+  )
+    return false;
+  const nativeSelection = element.ownerDocument.defaultView?.getSelection();
+  if (!nativeSelection?.focusNode) return false;
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const nodes: Node[] = [];
+  let node: Node | null;
+  while ((node = walker.nextNode())) nodes.push(node);
+  if (!nodes.length) return true;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  const position = (at: Node, offset: number, forward: boolean) => {
+    const range = element.ownerDocument.createRange();
+    range.setStart(at, offset);
+    range.collapse(true);
+    const rects = range.getClientRects?.();
+    let rect = rects?.[0];
+    if (rect?.height) return rect.top;
+    // Some WebKit caret ranges have no rectangle. Measure the adjacent glyph.
+    if (at.nodeType !== Node.TEXT_NODE) return undefined;
+    const length = at.textContent?.length ?? 0;
+    const start = forward && offset < length ? offset : Math.max(0, offset - 1);
+    if (start >= length) return undefined;
+    range.setStart(at, start);
+    range.setEnd(at, start + 1);
+    rect = range.getClientRects?.()[0];
+    return rect?.height ? rect.top : undefined;
+  };
+  const firstTop = position(first, 0, true);
+  const lastTop = position(last, last.textContent?.length ?? 0, false);
+  const caretTop = position(
+    nativeSelection.focusNode,
+    nativeSelection.focusOffset,
+    direction === 'up',
+  );
+  if (firstTop === undefined || lastTop === undefined || caretTop === undefined) {
+    // A full text range can still reveal wrapping when WebKit omits a caret
+    // rectangle. Without a caret line, leave multiline navigation native.
+    const full = element.ownerDocument.createRange();
+    full.selectNodeContents(element);
+    const lines = Array.from(full.getClientRects?.() ?? []).filter((rect) => rect.height);
+    if (lines.length) return lines.every((rect) => Math.abs(rect.top - lines[0].top) <= 1);
+    const box = element.getBoundingClientRect();
+    return box.width === 0 && box.height === 0;
+  }
+  return direction === 'up' ? caretTop <= firstTop + 1 : caretTop >= lastTop - 1;
+};
+
 /** Bound only for opted-in Form text fields; ordinary Text keeps its blur behavior. */
 export const bindTextFlowEditor = (
   element: HTMLDivElement,
@@ -252,6 +312,16 @@ export const bindTextFlowEditor = (
   };
   const keyDown = (event: KeyboardEvent) => {
     if (composing || event.isComposing) return;
+    const verticalArrow = event.key === 'ArrowUp' || event.key === 'ArrowDown';
+    if (
+      !verticalArrow ||
+      event.shiftKey ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      endingComposition
+    )
+      binding.clearVerticalNavigation?.();
     if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey) {
       const selection = readTextFlowSelection(element);
       if (selection.anchor === 0 && selection.focus === 0) {
@@ -265,6 +335,35 @@ export const bindTextFlowEditor = (
         });
         deleteBackwardAtStart(selection);
       }
+      return;
+    }
+    if (
+      !endingComposition &&
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      const nativeSelection = element.ownerDocument.defaultView?.getSelection();
+      if (
+        !nativeSelection?.anchorNode ||
+        !nativeSelection.focusNode ||
+        !element.contains(nativeSelection.anchorNode) ||
+        !element.contains(nativeSelection.focusNode)
+      ) {
+        binding.clearVerticalNavigation?.();
+        return;
+      }
+      const selection = readTextFlowSelection(element);
+      const direction = event.key === 'ArrowUp' ? 'up' : 'down';
+      if (
+        selection.anchor === selection.focus &&
+        isAtVerticalEdge(element, direction, selection) &&
+        binding.moveCaretVertically?.(direction, selection)
+      )
+        event.preventDefault();
+      else binding.clearVerticalNavigation?.();
       return;
     }
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
@@ -287,14 +386,18 @@ export const bindTextFlowEditor = (
       beforeSelection = readTextFlowSelection(element);
     }
   };
+  const rememberManualSelection = () => {
+    binding.clearVerticalNavigation?.();
+    rememberSelection();
+  };
   element.addEventListener('beforeinput', beforeInput);
   element.addEventListener('input', input);
   element.addEventListener('compositionstart', compositionStart);
   element.addEventListener('compositionend', compositionEnd);
   element.addEventListener('paste', paste);
   element.addEventListener('keydown', keyDown);
-  element.addEventListener('focus', rememberSelection);
-  element.addEventListener('pointerup', rememberSelection);
+  element.addEventListener('focus', rememberManualSelection);
+  element.addEventListener('pointerup', rememberManualSelection);
   element.addEventListener('keyup', rememberSelection);
   return () => {
     unregister();
@@ -304,8 +407,8 @@ export const bindTextFlowEditor = (
     element.removeEventListener('compositionend', compositionEnd);
     element.removeEventListener('paste', paste);
     element.removeEventListener('keydown', keyDown);
-    element.removeEventListener('focus', rememberSelection);
-    element.removeEventListener('pointerup', rememberSelection);
+    element.removeEventListener('focus', rememberManualSelection);
+    element.removeEventListener('pointerup', rememberManualSelection);
     element.removeEventListener('keyup', rememberSelection);
   };
 };

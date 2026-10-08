@@ -1,5 +1,8 @@
 import {
+  countTextFlowWidth,
   distributeTextFlow,
+  getTextFlowCaretOffsets,
+  getTextFlowOffsetAtWidth,
   getTextFlowLegacyNames,
   getTextFlowTargets,
   type Schema,
@@ -32,6 +35,80 @@ const copySnapshot = (state: Snapshot): Snapshot => ({
 const editorKey = (inputIndex: number, pageIndex: number, name: string) =>
   JSON.stringify([inputIndex, pageIndex, name]);
 
+/** Browser geometry keeps the same horizontal position across visibly wrapped rows. */
+const caretRect = (
+  element: HTMLElement | undefined,
+  value: string,
+  offset: number,
+  boundaries = getTextFlowCaretOffsets(value),
+) => {
+  const node = element?.firstChild;
+  if (
+    !node ||
+    element.childNodes.length !== 1 ||
+    node.nodeType !== Node.TEXT_NODE ||
+    node.textContent !== value
+  )
+    return undefined;
+  const range = element.ownerDocument.createRange();
+  range.setStart(node, offset);
+  range.collapse(true);
+  let rect = range.getClientRects?.()[0];
+  if (rect?.height) return { left: rect.left, top: rect.top };
+  // WebKit can omit collapsed caret rectangles while returning glyph geometry.
+  const next = boundaries.find((boundary) => boundary > offset);
+  const previous = boundaries.filter((boundary) => boundary < offset).at(-1);
+  if (next !== undefined) {
+    range.setStart(node, offset);
+    range.setEnd(node, next);
+    rect = range.getClientRects?.()[0];
+    return rect?.height ? { left: rect.left, top: rect.top } : undefined;
+  }
+  if (previous !== undefined) {
+    range.setStart(node, previous);
+    range.setEnd(node, offset);
+    rect = range.getClientRects?.()[0];
+    return rect?.height ? { left: rect.right, top: rect.top } : undefined;
+  }
+  return undefined;
+};
+
+const visualCaretOffset = (
+  element: HTMLElement | undefined,
+  value: string,
+  direction: 'up' | 'down',
+  wantedX: number | undefined,
+): number | undefined => {
+  if (!element || wantedX === undefined) return undefined;
+  // Older inputs may keep arbitrarily long legacy text in one field.
+  if (value.length > 200) return direction === 'up' ? value.length : 0;
+  const left = element.getBoundingClientRect().left;
+  const boundaries = getTextFlowCaretOffsets(value);
+  const positions = boundaries.flatMap((offset) => {
+    const rect = caretRect(element, value, offset, boundaries);
+    return rect ? [{ offset, top: rect.top, x: rect.left - left }] : [];
+  });
+  const full = element.ownerDocument.createRange();
+  full.selectNodeContents(
+    element.firstChild?.nodeType === Node.TEXT_NODE ? element.firstChild : element,
+  );
+  const fullLines = Array.from(full.getClientRects?.() ?? []).filter((rect) => rect.height);
+  if (!positions.length) {
+    const wrapped = fullLines.some((rect) => Math.abs(rect.top - fullLines[0].top) > 1);
+    return wrapped ? (direction === 'up' ? value.length : 0) : undefined;
+  }
+  const measured = [...positions, ...fullLines];
+  const edgeTop = measured.reduce(
+    (top, rect) => (direction === 'up' ? Math.max(top, rect.top) : Math.min(top, rect.top)),
+    direction === 'up' ? -Infinity : Infinity,
+  );
+  const onEdge = positions.filter(({ top }) => Math.abs(top - edgeTop) <= 1);
+  if (!onEdge.length) return direction === 'up' ? value.length : 0;
+  return onEdge.reduce((best, current) =>
+    Math.abs(current.x - wantedX) < Math.abs(best.x - wantedX) ? current : best,
+  ).offset;
+};
+
 /** Keeps a provisional editor state separate from the publicly committed inputs.
  * In particular, a discard save observes an immutable BEFORE snapshot, even when
  * dictation has already added another edit to the live contenteditable element.
@@ -54,6 +131,7 @@ export class TextFlowController {
   private committedRedo: History[] = [];
   private invalidPages = new Set<number>();
   private legacyNotified = false;
+  private verticalNavigation?: { key: string; offset: number; width: number; x?: number };
 
   constructor(
     private readonly getTemplate: () => Template,
@@ -86,6 +164,7 @@ export class TextFlowController {
     this.bindings.clear();
     this.invalidPages.clear();
     this.legacyNotified = false;
+    this.verticalNavigation = undefined;
     this.syncEditors();
   }
 
@@ -98,6 +177,7 @@ export class TextFlowController {
     this.bindings.clear();
     this.displayedSchemas.clear();
     this.groupVersions.clear();
+    this.verticalNavigation = undefined;
   }
 
   public async whenInputsSettled(): Promise<void> {
@@ -114,6 +194,7 @@ export class TextFlowController {
       schemas.map((page) => [...page]),
     );
     if (signature(previous) === signature(schemas)) return;
+    this.verticalNavigation = undefined;
     this.groupVersions.set(inputIndex, (this.groupVersions.get(inputIndex) ?? 0) + 1);
     this.bindings.forEach((_binding, key) => {
       if ((JSON.parse(key) as [number, number, string])[0] === inputIndex)
@@ -188,6 +269,77 @@ export class TextFlowController {
         if (!isCurrent()) return;
         this.edit(inputIndex, pageIndex, schema.name, edit);
       },
+      moveCaretVertically: (direction, selection) => {
+        if (!isCurrent()) return false;
+        const source = this.editors.get(key);
+        if (
+          !source ||
+          (source.element && source.element.ownerDocument.activeElement !== source.element)
+        )
+          return false;
+        const page = this.getSchemas(inputIndex)[pageIndex];
+        if (!page) return false;
+        const { targets, invalidReason } = getTextFlowTargets(page);
+        if (invalidReason) return false;
+        const sourceIndex = targets.findIndex(({ name }) => name === schema.name);
+        if (sourceIndex < 0) return false;
+        const target = targets[sourceIndex + (direction === 'up' ? -1 : 1)];
+        if (!target) return false;
+        const nextKey = editorKey(inputIndex, pageIndex, target.name);
+        const destination = this.editors.get(nextKey);
+        if (!destination || destination.isComposing()) return false;
+        if (destination.element) {
+          if (!destination.element.isConnected) return false;
+          if (source.element) {
+            const sourceBox = source.element.getBoundingClientRect();
+            const destinationBox = destination.element.getBoundingClientRect();
+            if (
+              (sourceBox.width > 0 || sourceBox.height > 0) &&
+              destinationBox.width === 0 &&
+              destinationBox.height === 0
+            )
+              return false;
+          }
+        }
+        const previous = this.verticalNavigation;
+        const sourceValue = this.state.inputs[inputIndex]?.[schema.name] ?? '';
+        const lineStart = sourceValue.lastIndexOf('\n', selection.focus - 1) + 1;
+        const continuing = previous?.key === key && previous.offset === selection.focus;
+        const width = continuing
+          ? previous.width
+          : countTextFlowWidth(sourceValue.slice(lineStart, selection.focus));
+        const x = continuing
+          ? previous.x
+          : (() => {
+              const rect = caretRect(source.element, sourceValue, selection.focus);
+              return rect && source.element
+                ? rect.left - source.element.getBoundingClientRect().left
+                : undefined;
+            })();
+        const targetValue = this.state.inputs[inputIndex]?.[target.name] ?? '';
+        const targetStart = direction === 'up' ? targetValue.lastIndexOf('\n') + 1 : 0;
+        const targetEnd =
+          direction === 'up'
+            ? targetValue.length
+            : targetValue.indexOf('\n') < 0
+              ? targetValue.length
+              : targetValue.indexOf('\n');
+        const offset =
+          visualCaretOffset(destination.element, targetValue, direction, x) ??
+          targetStart + getTextFlowOffsetAtWidth(targetValue.slice(targetStart, targetEnd), width);
+        destination.focusSelection({ anchor: offset, focus: offset });
+        if (
+          destination.element &&
+          destination.element.ownerDocument.activeElement !== destination.element
+        )
+          return false;
+        destination.element?.scrollIntoView?.({ block: 'nearest' });
+        this.verticalNavigation = { key: nextKey, offset, width, x };
+        return true;
+      },
+      clearVerticalNavigation: () => {
+        if (isCurrent()) this.verticalNavigation = undefined;
+      },
       undo: () => {
         if (!isCurrent()) return;
         this.undo();
@@ -207,6 +359,7 @@ export class TextFlowController {
     sourceName: string,
     edit: Parameters<TextFlowBinding['commitEdit']>[0],
   ) {
+    this.verticalNavigation = undefined;
     const input = this.state.inputs[inputIndex];
     if (!input) return;
     const before = copySnapshot(this.state);
@@ -277,6 +430,7 @@ export class TextFlowController {
 
   /** Ordinary fields use the same queue so pending flow commits cannot overwrite them. */
   public changeInput(inputIndex: number, name: string, value: string) {
+    this.verticalNavigation = undefined;
     if (!this.state.inputs[inputIndex] || this.state.inputs[inputIndex][name] === value) return;
     const before = copySnapshot(this.state);
     const after = copySnapshot(before);
@@ -295,6 +449,7 @@ export class TextFlowController {
   }
 
   public undo() {
+    this.verticalNavigation = undefined;
     const history = this.undoHistory.pop();
     if (!history) return;
     this.redoHistory.push(history);
@@ -315,6 +470,7 @@ export class TextFlowController {
   }
 
   public redo() {
+    this.verticalNavigation = undefined;
     const history = this.redoHistory.pop();
     if (!history) return;
     this.undoHistory.push(history);
@@ -424,11 +580,20 @@ export class TextFlowController {
           });
           this.queue = [];
           this.state = restored;
+          this.verticalNavigation = undefined;
           this.undoHistory = [...this.committedUndo];
           this.redoHistory = [...this.committedRedo];
-          // Preserve a patient/staff field's focus, selection, and native IME
-          // when its user moved away from the pending text transaction.
-          this.syncEditors(transaction.beforeFocus, this.hasActiveEditor());
+          // Restore the original caret only if that editor is still active.
+          // A user may have moved to another Text row while the save waited.
+          const original = transaction.beforeFocus;
+          const originalEditor =
+            original &&
+            this.editors.get(editorKey(original.inputIndex, original.pageIndex, original.name));
+          const restoreOriginalFocus = Boolean(
+            originalEditor?.element &&
+            originalEditor.element.ownerDocument.activeElement === originalEditor.element,
+          );
+          this.syncEditors(original, restoreOriginalFocus);
           if (hasOrdinaryChanges) {
             this.committed = copySnapshot(restored);
             this.commit(copyInputs(restored.inputs));
@@ -501,11 +666,5 @@ export class TextFlowController {
 
   private hasComposition() {
     return [...this.editors.values()].some((editor) => editor.isComposing());
-  }
-
-  private hasActiveEditor() {
-    return [...this.editors.values()].some(
-      (editor) => editor.element && editor.element.ownerDocument.activeElement === editor.element,
-    );
   }
 }

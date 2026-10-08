@@ -11,6 +11,7 @@ describe('flowing Text native editor', () => {
   let element: HTMLDivElement;
   let editor: TextFlowEditor;
   let commitEdit: jest.Mock;
+  let moveCaretVertically: jest.Mock;
   let undo: jest.Mock;
   let dispose: () => void;
 
@@ -21,6 +22,7 @@ describe('flowing Text native editor', () => {
     document.body.appendChild(element);
     element.focus();
     commitEdit = jest.fn();
+    moveCaretVertically = jest.fn(() => true);
     undo = jest.fn();
     const binding: TextFlowBinding = {
       isLegacy: false,
@@ -29,6 +31,7 @@ describe('flowing Text native editor', () => {
         return () => undefined;
       },
       commitEdit,
+      moveCaretVertically,
       undo,
     };
     dispose = bindTextFlowEditor(element, binding);
@@ -336,5 +339,115 @@ describe('flowing Text native editor', () => {
     element.dispatchEvent(composing);
     expect(composing.defaultPrevented).toBe(false);
     expect(commitEdit).not.toHaveBeenCalled();
+  });
+
+  it('moves a collapsed caret to the neighboring Text row with plain vertical arrows', () => {
+    editor.setValue('甲乙丙');
+    setTextFlowSelection(element, { anchor: 2, focus: 2 });
+
+    for (const [key, direction] of [
+      ['ArrowUp', 'up'],
+      ['ArrowDown', 'down'],
+    ] as const) {
+      const event = new KeyboardEvent('keydown', { key, cancelable: true });
+      element.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      expect(moveCaretVertically).toHaveBeenLastCalledWith(direction, { anchor: 2, focus: 2 });
+    }
+    expect(moveCaretVertically).toHaveBeenCalledTimes(2);
+    expect(commitEdit).not.toHaveBeenCalled();
+
+    moveCaretVertically.mockReturnValueOnce(false);
+    const edge = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    element.dispatchEvent(edge);
+    expect(edge.defaultPrevented).toBe(false);
+  });
+
+  it('leaves modified arrows, selected text, and active composition to the native editor', () => {
+    editor.setValue('甲乙丙');
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    for (const modifier of [
+      { shiftKey: true },
+      { metaKey: true },
+      { ctrlKey: true },
+      { altKey: true },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        cancelable: true,
+        ...modifier,
+      });
+      element.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+
+    setTextFlowSelection(element, { anchor: 0, focus: 2 });
+    const selected = new KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+    element.dispatchEvent(selected);
+    expect(selected.defaultPrevented).toBe(false);
+
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    element.dispatchEvent(new CompositionEvent('compositionstart'));
+    const composing = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    element.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(moveCaretVertically).not.toHaveBeenCalled();
+    expect(commitEdit).not.toHaveBeenCalled();
+  });
+
+  it('keeps vertical movement inside a multiline legacy row until its first or last line', () => {
+    editor.setValue('甲乙\n丙丁\n戊己', undefined, true);
+    setTextFlowSelection(element, { anchor: 4, focus: 4 });
+    for (const key of ['ArrowUp', 'ArrowDown']) {
+      const event = new KeyboardEvent('keydown', { key, cancelable: true });
+      element.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(moveCaretVertically).not.toHaveBeenCalled();
+
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    const above = new KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+    element.dispatchEvent(above);
+    expect(above.defaultPrevented).toBe(true);
+    expect(moveCaretVertically).toHaveBeenLastCalledWith('up', { anchor: 1, focus: 1 });
+
+    setTextFlowSelection(element, { anchor: 7, focus: 7 });
+    const below = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    element.dispatchEvent(below);
+    expect(below.defaultPrevented).toBe(true);
+    expect(moveCaretVertically).toHaveBeenLastCalledWith('down', { anchor: 7, focus: 7 });
+  });
+
+  it('leaves CSS-wrapped lines to native arrows and moves only at the visible edge', () => {
+    editor.setValue('abcdefgh');
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: function (this: Range) {
+        const top = this.startOffset < 4 ? 10 : 30;
+        return [{ top, height: 12 }] as unknown as DOMRectList;
+      },
+    });
+    try {
+      const arrow = (offset: number, key: 'ArrowUp' | 'ArrowDown') => {
+        setTextFlowSelection(element, { anchor: offset, focus: offset });
+        const event = new KeyboardEvent('keydown', { key, cancelable: true });
+        element.dispatchEvent(event);
+        return event;
+      };
+
+      expect(arrow(2, 'ArrowDown').defaultPrevented).toBe(false);
+      expect(arrow(6, 'ArrowUp').defaultPrevented).toBe(false);
+      expect(moveCaretVertically).not.toHaveBeenCalled();
+
+      expect(arrow(2, 'ArrowUp').defaultPrevented).toBe(true);
+      expect(moveCaretVertically).toHaveBeenLastCalledWith('up', { anchor: 2, focus: 2 });
+      expect(arrow(6, 'ArrowDown').defaultPrevented).toBe(true);
+      expect(moveCaretVertically).toHaveBeenLastCalledWith('down', { anchor: 6, focus: 6 });
+      expect(moveCaretVertically).toHaveBeenCalledTimes(2);
+    } finally {
+      if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+    }
   });
 });

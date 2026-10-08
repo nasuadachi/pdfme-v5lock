@@ -21,7 +21,7 @@ const appended = 'あうあうあーついかついかついか追加追加';
 const cleanups: Array<() => void> = [];
 const caret = (offset: number) => ({ anchor: offset, focus: offset });
 
-const make = (value: string) => {
+const make = (value: string, otherValues: Record<string, string> = {}) => {
   const schemas: Schema[] = Array.from({ length: 16 }, (_, index) => ({
     name: `text${String(index + 1).padStart(2, '0')}`,
     type: 'text',
@@ -32,6 +32,7 @@ const make = (value: string) => {
   let inputs: Record<string, string>[] = [
     {
       ...Object.fromEntries(schemas.map(({ name }) => [name, name === 'text06' ? value : ''])),
+      ...otherValues,
       patientName: '患者名を保持',
       '%staffSelect6%': '担当医を保持',
     },
@@ -109,6 +110,152 @@ const paste = (element: HTMLDivElement, value: string) => {
 
 afterEach(() => {
   cleanups.splice(0).forEach((dispose) => dispose());
+});
+
+test('plain vertical arrows move between adjacent single-line Text fields without editing', () => {
+  const f = make('甲乙丙', { text05: '前', text07: '後' });
+  const before = { ...f.inputs() };
+  setTextFlowSelection(f.source, caret(2));
+
+  const up = new KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+  f.source.dispatchEvent(up);
+  expect(up.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.elements[4]);
+  expect(readTextFlowSelection(f.elements[4])).toEqual(caret(1));
+
+  const down = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.elements[4].dispatchEvent(down);
+  expect(down.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.source);
+  expect(readTextFlowSelection(f.source)).toEqual(caret(2));
+
+  const next = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.source.dispatchEvent(next);
+  expect(next.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.next);
+  expect(readTextFlowSelection(f.next)).toEqual(caret(1));
+
+  expect(f.inputs()).toEqual(before);
+  expect(f.commit).not.toHaveBeenCalled();
+  f.expectSynchronized();
+});
+
+test('repeated vertical arrows visit empty Text fields without removing or filling them', () => {
+  const f = make('甲乙丙');
+  const before = { ...f.inputs() };
+  setTextFlowSelection(f.source, caret(2));
+
+  for (const [from, to, key] of [
+    [f.source, f.elements[6], 'ArrowDown'],
+    [f.elements[6], f.elements[7], 'ArrowDown'],
+    [f.elements[7], f.elements[6], 'ArrowUp'],
+    [f.elements[6], f.source, 'ArrowUp'],
+  ] as const) {
+    const event = new KeyboardEvent('keydown', { key, cancelable: true });
+    from.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(to);
+    if (to !== f.source) expect(readTextFlowSelection(to)).toEqual(caret(0));
+  }
+  expect(readTextFlowSelection(f.source)).toEqual(caret(2));
+
+  expect(f.inputs()).toEqual(before);
+  expect(f.commit).not.toHaveBeenCalled();
+  f.expectSynchronized();
+});
+
+test('vertical arrows keep the full-width column across ASCII and emoji without splitting a surrogate pair', () => {
+  const f = make('甲乙', { text07: 'ABCDE', text08: '😀A' });
+  const before = { ...f.inputs() };
+  setTextFlowSelection(f.source, caret(1));
+
+  const ascii = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.source.dispatchEvent(ascii);
+  expect(ascii.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.elements[6]);
+  expect(readTextFlowSelection(f.elements[6])).toEqual(caret(2));
+
+  const emoji = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.elements[6].dispatchEvent(emoji);
+  expect(emoji.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.elements[7]);
+  expect(readTextFlowSelection(f.elements[7])).toEqual(caret(2));
+  expect(f.inputs()).toEqual(before);
+  expect(f.commit).not.toHaveBeenCalled();
+});
+
+test('clicking an empty destination clears the remembered column before the next arrow', () => {
+  const f = make('甲乙丙', { text08: '丁戊己' });
+  setTextFlowSelection(f.source, caret(2));
+  const first = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.source.dispatchEvent(first);
+  expect(document.activeElement).toBe(f.elements[6]);
+  expect(readTextFlowSelection(f.elements[6])).toEqual(caret(0));
+
+  f.elements[6].dispatchEvent(new Event('pointerup'));
+  const second = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.elements[6].dispatchEvent(second);
+  expect(second.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(f.elements[7]);
+  expect(readTextFlowSelection(f.elements[7])).toEqual(caret(0));
+  expect(f.commit).not.toHaveBeenCalled();
+});
+
+test('ArrowDown stays native when the registered next Text editor is detached', () => {
+  const f = make('甲乙');
+  const before = { ...f.inputs() };
+  setTextFlowSelection(f.source, caret(1));
+  f.next.remove();
+
+  const down = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+  f.source.dispatchEvent(down);
+
+  expect(down.defaultPrevented).toBe(false);
+  expect(document.activeElement).toBe(f.source);
+  expect(readTextFlowSelection(f.source)).toEqual(caret(1));
+  expect(f.inputs()).toEqual(before);
+  expect(f.commit).not.toHaveBeenCalled();
+});
+
+test('vertical arrows keep the visible column when leaving and entering wrapped Text fields', () => {
+  const f = make('ABCDEFGH', { text07: 'wxyz' });
+  const before = { ...f.inputs() };
+  const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+  Object.defineProperty(Range.prototype, 'getClientRects', {
+    configurable: true,
+    value: function (this: Range) {
+      const value = this.startContainer.textContent;
+      const offset = this.startOffset;
+      if (value === 'ABCDEFGH') {
+        const wrapped = offset >= 4;
+        return [
+          { top: wrapped ? 30 : 10, left: (wrapped ? offset - 4 : offset) * 5, height: 12 },
+        ] as unknown as DOMRectList;
+      }
+      if (value === 'wxyz')
+        return [{ top: 50, left: offset * 5, height: 12 }] as unknown as DOMRectList;
+      return [] as unknown as DOMRectList;
+    },
+  });
+  try {
+    setTextFlowSelection(f.source, caret(6));
+    const down = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    f.source.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(f.next);
+    expect(readTextFlowSelection(f.next)).toEqual(caret(2));
+
+    const up = new KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+    f.next.dispatchEvent(up);
+    expect(up.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(f.source);
+    expect(readTextFlowSelection(f.source)).toEqual(caret(6));
+    expect(f.inputs()).toEqual(before);
+    expect(f.commit).not.toHaveBeenCalled();
+  } finally {
+    if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+    else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+  }
 });
 
 test('normal input after a full row normalizes its native DOM even when its committed prefix is unchanged', () => {

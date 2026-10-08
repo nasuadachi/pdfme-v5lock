@@ -72,6 +72,8 @@ export {
   getTextFlowTargets,
   hydrateTextFlowInputs,
   countTextFlowWidth,
+  getTextFlowCaretOffsets,
+  getTextFlowOffsetAtWidth,
   getTextFlowLegacyNames,
   distributeTextFlow,
 } from './textFlow.js';

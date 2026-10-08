@@ -329,6 +329,49 @@ test('failed pre-discard save preserves focus in an ordinary patient field', asy
   }
 });
 
+test('failed pre-discard save keeps focus in another Text editor opened while saving', async () => {
+  let reject!: (error: Error) => void;
+  const before = { [names[0]]: 'あ', [names[1]]: '甲', [names[2]]: '乙' };
+  const f = make(
+    before,
+    {
+      enabled: true,
+      onBeforeDiscard: () =>
+        new Promise((_done, fail) => {
+          reject = fail;
+        }),
+    },
+    template(3),
+  );
+  const source = fakeEditor();
+  const other = fakeEditor();
+  for (const editor of [source, other]) {
+    editor.element!.tabIndex = 0;
+    document.body.appendChild(editor.element!);
+    editor.focusSelection = jest.fn(() => editor.element!.focus());
+  }
+  try {
+    f.binding().registerEditor(source);
+    f.binding(names[2]).registerEditor(other);
+    source.element!.focus();
+    f.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+    expect(reject).toBeDefined();
+    other.element!.focus();
+    expect(document.activeElement).toBe(other.element);
+    (source.focusSelection as jest.Mock).mockClear();
+
+    reject(new Error('offline'));
+    await f.controller.whenInputsSettled();
+
+    expect(document.activeElement).toBe(other.element);
+    expect(source.focusSelection).not.toHaveBeenCalled();
+    expect(f.inputs()).toEqual([before]);
+  } finally {
+    source.element!.remove();
+    other.element!.remove();
+  }
+});
+
 test('a saved legacy paragraph retains its exemption while editing and moving', () => {
   const f = make({
     [names[0]]: 'あ',
