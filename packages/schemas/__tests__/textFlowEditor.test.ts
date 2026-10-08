@@ -187,7 +187,7 @@ describe('flowing Text native editor', () => {
     expect(commitEdit).not.toHaveBeenCalled();
   });
 
-  it('compacts on deletion in an already blank editor even without a native input event', () => {
+  it('routes Backspace from a blank row even without a native input event', () => {
     const event = new InputEvent('beforeinput', {
       inputType: 'deleteContentBackward',
       cancelable: true,
@@ -199,6 +199,7 @@ describe('flowing Text native editor', () => {
         value: '',
         inputType: 'deleteContentBackward',
         allowDeletionPullUp: true,
+        deleteBackwardAtStart: true,
       }),
     );
   });

@@ -271,6 +271,87 @@ describe('transactional row distribution', () => {
     expect(before).toEqual({ 'text1-4': '甲乙丙欄', 'text2-4': 'だけです', 'text3-4': '' });
   });
 
+  test('Backspace on a blank row deletes the preceding final grapheme and closes the blank row', () => {
+    const before = {
+      'text1-4': '甲乙丙欄',
+      'text2-4': '',
+      'text3-4': 'だけです',
+      'text4-4': '後',
+    };
+    const edited = successful(
+      distributeTextFlow({
+        targets: targets(4, 4, 4, 4),
+        inputs: before,
+        sourceName: 'text2-4',
+        value: '',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-4': '甲乙丙',
+      'text2-4': 'だけです',
+      'text3-4': '後',
+      'text4-4': '',
+    });
+    expect(softAfter(edited.inputs)).toEqual([]);
+    expect(edited.selection).toEqual({ name: 'text1-4', anchor: 3, focus: 3 });
+    expect(before['text1-4']).toBe('甲乙丙欄');
+  });
+
+  test.each(['欄', '👨‍👩‍👧‍👦'])(
+    'Backspace after the sole preceding grapheme %s keeps that row empty',
+    (previous) => {
+      const edited = successful(
+        distributeTextFlow({
+          targets: targets(4, 4, 4, 4),
+          inputs: { 'text1-4': previous, 'text2-4': '', 'text3-4': '次', 'text4-4': '後' },
+          sourceName: 'text2-4',
+          value: '',
+          selection: { anchor: 0, focus: 0 },
+          deleteBackwardAtStart: true,
+        }),
+      );
+      expect(bodyInputs(edited.inputs)).toEqual({
+        'text1-4': '',
+        'text2-4': '次',
+        'text3-4': '後',
+        'text4-4': '',
+      });
+      expect(edited.selection).toEqual({ name: 'text1-4', anchor: 0, focus: 0 });
+    },
+  );
+
+  test('Backspace on a blank row shortens a preceding soft paragraph', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const edited = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { ...created.inputs, 'text3-2': '', 'text4-2': '後' },
+        sourceName: 'text3-2',
+        value: '',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'う',
+      'text3-2': '後',
+      'text4-2': '',
+    });
+    expect(softAfter(edited.inputs)).toEqual([0]);
+    expect(edited.selection).toEqual({ name: 'text2-2', anchor: 1, focus: 1 });
+  });
+
   test('Backspace joins an automatic continuation and deletes one whole emoji grapheme', () => {
     const rows = targets(2, 2, 2);
     const created = successful(

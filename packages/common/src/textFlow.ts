@@ -43,7 +43,7 @@ export type TextFlowEdit = {
   inputType?: string;
   preferNextRow?: boolean;
   allowDeletionPullUp?: boolean;
-  /** Backspace at the start of a nonempty continuation joins it to the preceding row. */
+  /** Backspace at a row start deletes the preceding row's last grapheme and joins the rows. */
   deleteBackwardAtStart?: boolean;
 };
 export type TextFlowEditor = {
@@ -358,7 +358,8 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   );
   let selection = args.selection ?? { anchor: value.length, focus: value.length };
   let joinedEndIndex: number | undefined;
-  if (args.deleteBackwardAtStart && sourceIndex > 0 && value !== '') {
+  const deletingFromEmptyRow = args.deleteBackwardAtStart && sourceIndex > 0 && value === '';
+  if (args.deleteBackwardAtStart && sourceIndex > 0) {
     // A row boundary is normally hard unless it was created by automatic wrap.
     // Backspace at the beginning explicitly removes that boundary and the last
     // grapheme before it, even for older inputs without soft-break metadata.
@@ -431,6 +432,11 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
     return { ok: false, reason: 'source-overflow' };
   const sourceChunks = sourceLayout.chunks;
+  // Deleting the only grapheme before an empty row leaves the preceding row
+  // empty. Keep that row while closing the current one and pulling later rows up.
+  if (deletingFromEmptyRow && sourceChunks.length === 0) {
+    sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
+  }
   const continuation =
     !sourceIsLegacy &&
     !continuationValue &&
