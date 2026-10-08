@@ -42,7 +42,7 @@ export type TextFlowEdit = {
   beforeSelection?: TextFlowSelection;
   inputType?: string;
   preferNextRow?: boolean;
-  /** Backspace at a row start deletes the preceding row's last grapheme and joins the rows. */
+  /** Backspace at a row start joins rows; short hard boundaries retain text, while soft wraps and empty rows delete the previous grapheme. */
   deleteBackwardAtStart?: boolean;
 };
 export type TextFlowEditor = {
@@ -387,9 +387,8 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   let joinedEndIndex: number | undefined;
   const deletingFromEmptyRow = args.deleteBackwardAtStart && sourceIndex > 0 && value === '';
   if (args.deleteBackwardAtStart && sourceIndex > 0) {
-    // A row boundary is normally hard unless it was created by automatic wrap.
-    // Backspace at the beginning explicitly removes that boundary and the last
-    // grapheme before it, even for older inputs without soft-break metadata.
+    // Backspace explicitly removes a row boundary, even for saved rows without
+    // soft-break metadata. A full previous row also loses its final grapheme.
     const currentIndex = sourceIndex;
     const currentIsLegacy = legacy.has(sourceName);
     let previousStartIndex = currentIndex - 1;
@@ -415,8 +414,17 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
       .slice(previousStartIndex, currentIndex)
       .map(({ name }) => inputs[name] || '')
       .join('');
-    const prefixGraphemes = getGraphemes(prefix);
-    const deletedPrefix = prefix.slice(0, prefixGraphemes.at(-1)?.start ?? prefix.length);
+    const previousRow = targets[currentIndex - 1];
+    const previousRowIsFull =
+      countTextFlowWidth(inputs[previousRow.name] || '') >= previousRow.maxLength;
+    // An empty current row still deletes the previous character but remains in
+    // place. A soft wrap has no hard boundary to remove, even when its unused
+    // half-width slot cannot fit the next full-width grapheme.
+    const deletePreviousGrapheme =
+      deletingFromEmptyRow || previousRowIsFull || softBreaks.has(currentIndex - 1);
+    const joinedPrefix = deletePreviousGrapheme
+      ? prefix.slice(0, getGraphemes(prefix).at(-1)?.start ?? prefix.length)
+      : prefix;
     const suffix = targets
       .slice(currentIndex + 1, joinedEndIndex + 1)
       .map(({ name }) => inputs[name] || '')
@@ -424,8 +432,8 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     sourceIndex = previousStartIndex;
     sourceName = targets[sourceIndex].name;
     if (currentIsLegacy) legacy.add(sourceName);
-    value = deletedPrefix + value + suffix;
-    selection = { anchor: deletedPrefix.length, focus: deletedPrefix.length };
+    value = joinedPrefix + value + suffix;
+    selection = { anchor: joinedPrefix.length, focus: joinedPrefix.length };
   }
   const sourceIsLegacy = legacy.has(sourceName) && value !== '';
   // A live newline at the end inserts an empty row before existing text below.

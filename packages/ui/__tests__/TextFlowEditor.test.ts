@@ -258,6 +258,30 @@ test('vertical arrows keep the visible column when leaving and entering wrapped 
   }
 });
 
+test.each(['keydown', 'beforeinput'])(
+  'row-start Backspace through %s joins a short previous row without deleting text',
+  (path) => {
+    const f = make('だけです', { text05: '甲乙丙' });
+    setTextFlowSelection(f.source, caret(0));
+    const event =
+      path === 'keydown'
+        ? new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true })
+        : new InputEvent('beforeinput', {
+            inputType: 'deleteContentBackward',
+            cancelable: true,
+          });
+    f.source.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(f.inputs().text05).toBe('甲乙丙だけです');
+    expect(f.inputs().text06).toBe('');
+    expect(document.activeElement).toBe(f.elements[4]);
+    expect(readTextFlowSelection(f.elements[4])).toEqual(caret(3));
+    f.expectSynchronized();
+    expect(f.commit).toHaveBeenCalledTimes(1);
+  },
+);
+
 test('normal input after a full row normalizes its native DOM even when its committed prefix is unchanged', () => {
   const f = make(exactTwenty);
   expect(countTextFlowWidth(exactTwenty)).toBe(20);

@@ -256,6 +256,107 @@ describe('transactional row distribution', () => {
     expect(softAfter(edited.inputs)).toEqual([0]);
   });
 
+  test('row-start Backspace joins a short saved row without deleting its final character', () => {
+    const before = { 'text1-4': '甲乙丙', 'text2-4': 'だけです', 'text3-4': '' };
+    const joined = successful(
+      distributeTextFlow({
+        targets: targets(4, 4, 4),
+        inputs: before,
+        sourceName: 'text2-4',
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-4': '甲乙丙だ',
+      'text2-4': 'けです',
+      'text3-4': '',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0]);
+    expect(joined.selection).toEqual({ name: 'text1-4', anchor: 3, focus: 3 });
+    expect(joined.discarded).toEqual([]);
+    expect(before['text1-4']).toBe('甲乙丙');
+  });
+
+  test('row-start Backspace uses the default 20-character limit and retains later paragraphs', () => {
+    const rows = ['text1', 'text2', 'text3'].map((name) => parseTextFlowName(name)!);
+    const before = {
+      text1: 'ありがとうございます',
+      text2: 'ありがとうございました。',
+      text3: '後続',
+    };
+    const joined = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: before,
+        sourceName: 'text2',
+        value: before.text2,
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      text1: 'ありがとうございますありがとうございまし',
+      text2: 'た。',
+      text3: '後続',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0]);
+    expect(joined.selection).toEqual({ name: 'text1', anchor: 10, focus: 10 });
+    expect(joined.discarded).toEqual([]);
+  });
+
+  test('row-start Backspace measures half-width characters against the preceding row limit', () => {
+    const joined = successful(
+      distributeTextFlow({
+        targets: targets(2, 2),
+        inputs: { 'text1-2': 'AB', 'text2-2': 'あい' },
+        sourceName: 'text2-2',
+        value: 'あい',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({ 'text1-2': 'ABあ', 'text2-2': 'い' });
+    expect(joined.selection).toEqual({ name: 'text1-2', anchor: 2, focus: 2 });
+  });
+
+  test('row-start Backspace deletes across an automatic wrap with an unusable half-width gap', () => {
+    const rows = targets(1, 1);
+    const wrapped = successful(
+      distributeTextFlow({ targets: rows, inputs: {}, sourceName: 'text1-1', value: 'A😀' }),
+    );
+    expect(bodyInputs(wrapped.inputs)).toEqual({ 'text1-1': 'A', 'text2-1': '😀' });
+    expect(softAfter(wrapped.inputs)).toEqual([0]);
+
+    const deleted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: wrapped.inputs,
+        sourceName: 'text2-1',
+        value: '😀',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(deleted.inputs)).toEqual({ 'text1-1': '😀', 'text2-1': '' });
+    expect(softAfter(deleted.inputs)).toEqual([]);
+    expect(deleted.selection).toEqual({ name: 'text1-1', anchor: 0, focus: 0 });
+
+    const hard = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { 'text1-1': 'A', 'text2-1': '😀' },
+        sourceName: 'text2-1',
+        value: '😀',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(hard.inputs)).toEqual({ 'text1-1': 'A', 'text2-1': '😀' });
+    expect(softAfter(hard.inputs)).toEqual([0]);
+  });
+
   test('Backspace at the start of a saved second row deletes the previous grapheme and joins it', () => {
     const before = { 'text1-4': '甲乙丙欄', 'text2-4': 'だけです', 'text3-4': '' };
     const joined = successful(
@@ -410,6 +511,44 @@ describe('transactional row distribution', () => {
     });
     expect(softAfter(joined.inputs)).toEqual([0]);
     expect(joined.selection).toEqual({ name: 'text1-2', anchor: 1, focus: 1 });
+  });
+
+  test('row-start Backspace retains a short final row in a preceding soft paragraph', () => {
+    const rows = targets(3, 3, 3, 3);
+    const first = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-3',
+        value: 'あいうえ',
+      }),
+    );
+    const second = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: first.inputs,
+        sourceName: 'text3-3',
+        value: 'だけです',
+      }),
+    );
+    const joined = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: second.inputs,
+        sourceName: 'text3-3',
+        value: 'だけで',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-3': 'あいう',
+      'text2-3': 'えだけ',
+      'text3-3': 'です',
+      'text4-3': '',
+    });
+    expect(softAfter(joined.inputs)).toEqual([0, 1]);
+    expect(joined.selection).toEqual({ name: 'text2-3', anchor: 1, focus: 1 });
   });
 
   test('Backspace joins the preceding soft paragraph and the current soft continuation', () => {
