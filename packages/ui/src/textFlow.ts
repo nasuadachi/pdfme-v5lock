@@ -256,7 +256,7 @@ export class TextFlowController {
       // already moved the caret. Normalize that row without stealing focus back.
       const sourceActive =
         !source?.element || source.element.ownerDocument.activeElement === source.element;
-      this.syncEditors(afterFocus, sourceActive);
+      this.syncEditors(sourceActive ? afterFocus : undefined, sourceActive);
       return;
     }
     const history: History = { before, after, beforeFocus, afterFocus };

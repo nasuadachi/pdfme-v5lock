@@ -33,6 +33,10 @@ const row = (name: string): Schema => ({
 });
 const names = ['text01-2', 'text002-2', 'text3-2'];
 const template: Template = { basePdf: BLANK_A4_PDF, schemas: [names.map(row)] };
+const bodyInputs = (input: Record<string, string>) => {
+  const { __pdfme_text_flow_soft_after: _softAfter, ...body } = input;
+  return body;
+};
 
 beforeEach(() => {
   global.ResizeObserver = class {
@@ -78,9 +82,9 @@ test('all Form change callbacks observe the completed multi-row transaction', ()
       .textFlowController!.getBinding(0, 0, row(names[0]))!
       .commitEdit({ value: 'あいう', selection: { anchor: 3, focus: 3 } });
   });
-  expect(observed).toHaveLength(3);
+  expect(observed).toHaveLength(4);
   observed.forEach((inputs) =>
-    expect(inputs[0]).toEqual({
+    expect(bodyInputs(inputs[0])).toEqual({
       [names[0]]: 'あい',
       [names[1]]: 'う',
       [names[2]]: '甲',
@@ -129,7 +133,11 @@ test('Form getInputs stays old until pre-discard persistence succeeds and settle
     resolve(true);
     await pending;
   });
-  expect(form.getInputs()[0]).toEqual({ [names[0]]: 'あい', [names[1]]: 'う', [names[2]]: '甲' });
+  expect(bodyInputs(form.getInputs()[0])).toEqual({
+    [names[0]]: 'あい',
+    [names[1]]: 'う',
+    [names[2]]: '甲',
+  });
   form.destroy();
 });
 
@@ -245,7 +253,7 @@ test('setInputs cancels an old pending transaction before rendering normalized r
       selection: { anchor: 3, focus: 3 },
     });
   });
-  expect(form.getInputs()[0]).toEqual({
+  expect(bodyInputs(form.getInputs()[0])).toEqual({
     [names[0]]: '新本',
     [names[1]]: '文',
     [names[2]]: '',

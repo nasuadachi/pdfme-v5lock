@@ -143,11 +143,12 @@ test('Preview waits for queued table input before publishing new visible flow gr
     await controller.whenInputsSettled();
   });
   await waitFor(() => expect(controller.getBinding(0, 1, target)).toBeDefined());
-  expect(mockDynamic.mock.calls.at(-1)![0].input).toEqual({
+  expect(mockDynamic.mock.calls.at(-1)![0].input).toMatchObject({
     'text1-1': '甲',
     'text2-1': '丙',
     items: 'expanded',
   });
+  expect(mockDynamic.mock.calls.at(-1)![0].input.__pdfme_text_flow_soft_after).toBeDefined();
   expect(mockRenderers.get('text2-1')!.textFlow).toBeDefined();
   act(() => {
     mockRenderers

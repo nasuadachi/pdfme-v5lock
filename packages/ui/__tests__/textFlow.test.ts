@@ -21,6 +21,10 @@ const template = (count = 4): Template => ({
   schemas: [names.slice(0, count).map(row)],
 });
 const selection = (offset: number) => ({ anchor: offset, focus: offset });
+const bodyInputs = (input: Record<string, string>) => {
+  const { __pdfme_text_flow_soft_after: _softAfter, ...body } = input;
+  return body;
+};
 const make = (
   input: Record<string, string>,
   options: TextFlowOptions = { enabled: true },
@@ -60,7 +64,7 @@ test('commits every changed text row atomically and preserves metadata', () => {
   f.binding(names[1]).registerEditor(editor);
   f.binding().commitEdit({ value: 'あいうえ', selection: selection(4) });
   expect(f.commit).toHaveBeenCalledTimes(1);
-  expect(f.inputs()[0]).toEqual({
+  expect(bodyInputs(f.inputs()[0])).toEqual({
     [names[0]]: 'あい',
     [names[1]]: 'うえ',
     [names[2]]: '甲',
@@ -115,7 +119,7 @@ test('an async pre-discard save receives the immutable old inputs; queued typing
   expect(f.commit).not.toHaveBeenCalled();
   resolve(true);
   await f.controller.whenInputsSettled();
-  expect(f.inputs()[0]).toEqual({
+  expect(bodyInputs(f.inputs()[0])).toEqual({
     [names[0]]: 'あい',
     [names[1]]: 'う',
     [names[2]]: '甲',
@@ -334,6 +338,26 @@ test('flow undo and redo preserve unrelated later edits', () => {
   f.binding().redo?.();
   expect(f.inputs()[0][names[1]]).toBe('う');
   expect(f.inputs()[0].patientName).toBe('更新した患者');
+});
+
+test('saved automatic continuation reflows after reopening and survives undo and redo', () => {
+  const first = make(
+    { [names[0]]: '', [names[1]]: '', [names[2]]: '' },
+    { enabled: true },
+    template(3),
+  );
+  first.binding().commitEdit({ value: 'あいう', selection: selection(3) });
+  const saved = { ...first.inputs()[0] };
+  expect(saved.__pdfme_text_flow_soft_after).toBeDefined();
+  const reopened = make(saved, { enabled: true }, template(3));
+  reopened.binding().commitEdit({ value: 'あ', selection: selection(1) });
+  expect(reopened.inputs()[0][names[0]]).toBe('あう');
+  expect(reopened.inputs()[0][names[1]]).toBe('');
+  reopened.binding().undo?.();
+  expect(reopened.inputs()[0]).toEqual(saved);
+  reopened.binding().redo?.();
+  expect(reopened.inputs()[0][names[0]]).toBe('あう');
+  expect(reopened.inputs()[0][names[1]]).toBe('');
 });
 
 test('page-local targets do not continue into another page', () => {
