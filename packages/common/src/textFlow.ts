@@ -43,6 +43,8 @@ export type TextFlowEdit = {
   inputType?: string;
   preferNextRow?: boolean;
   allowDeletionPullUp?: boolean;
+  /** Backspace at the start of a nonempty continuation joins it to the preceding row. */
+  deleteBackwardAtStart?: boolean;
 };
 export type TextFlowEditor = {
   element?: HTMLElement;
@@ -285,6 +287,7 @@ export type DistributeTextFlowArgs = {
   legacyNames?: ReadonlyArray<string>;
   preferNextRow?: boolean;
   allowDeletionPullUp?: boolean;
+  deleteBackwardAtStart?: boolean;
 };
 export type TextFlowDistribution =
   | { ok: false; reason: 'source-overflow' | 'invalid-source' | 'invalid-configuration' }
@@ -330,7 +333,8 @@ const mapSelection = (
 
 /** Compute the whole transaction without mutating inputs; the caller must authorize discarded tails. */
 export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistribution => {
-  const { inputs, sourceName, value } = args;
+  const { inputs } = args;
+  let { sourceName, value } = args;
   const targets = [...args.targets].sort((a, b) => a.row - b.row);
   if (
     new Set(targets.map(({ row }) => row)).size !== targets.length ||
@@ -344,17 +348,59 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   ) {
     return { ok: false, reason: 'invalid-configuration' };
   }
-  const sourceIndex = targets.findIndex(({ name }) => name === sourceName);
+  let sourceIndex = targets.findIndex(({ name }) => name === sourceName);
   if (sourceIndex < 0) return { ok: false, reason: 'invalid-source' };
   const legacy = new Set(args.legacyNames ?? getTextFlowLegacyNames(targets, inputs));
-  const sourceIsLegacy = legacy.has(sourceName) && value !== '';
   const savedSoftBreaks = readSoftBreaks(inputs);
   const pageKey = softBreakPageKey(targets);
   const softBreaks = new Set(
     (savedSoftBreaks[pageKey] ?? []).filter((index) => index >= 0 && index < targets.length - 1),
   );
+  let selection = args.selection ?? { anchor: value.length, focus: value.length };
+  let joinedEndIndex: number | undefined;
+  if (args.deleteBackwardAtStart && sourceIndex > 0 && value !== '') {
+    // A row boundary is normally hard unless it was created by automatic wrap.
+    // Backspace at the beginning explicitly removes that boundary and the last
+    // grapheme before it, even for older inputs without soft-break metadata.
+    const currentIndex = sourceIndex;
+    const currentIsLegacy = legacy.has(sourceName);
+    let previousStartIndex = currentIndex - 1;
+    while (
+      previousStartIndex > 0 &&
+      softBreaks.has(previousStartIndex - 1) &&
+      inputs[targets[previousStartIndex - 1].name] &&
+      !legacy.has(targets[previousStartIndex - 1].name)
+    )
+      previousStartIndex--;
+    joinedEndIndex = currentIndex;
+    while (
+      softBreaks.has(joinedEndIndex) &&
+      joinedEndIndex + 1 < targets.length &&
+      inputs[targets[joinedEndIndex + 1].name] &&
+      !legacy.has(targets[joinedEndIndex + 1].name)
+    )
+      joinedEndIndex++;
+    const prefix = targets
+      .slice(previousStartIndex, currentIndex)
+      .map(({ name }) => inputs[name] || '')
+      .join('');
+    const prefixGraphemes = getGraphemes(prefix);
+    const deletedPrefix = prefix.slice(0, prefixGraphemes.at(-1)?.start ?? prefix.length);
+    const suffix = targets
+      .slice(currentIndex + 1, joinedEndIndex + 1)
+      .map(({ name }) => inputs[name] || '')
+      .join('');
+    sourceIndex = previousStartIndex;
+    sourceName = targets[sourceIndex].name;
+    if (currentIsLegacy) legacy.add(sourceName);
+    value = deletedPrefix + value + suffix;
+    selection = { anchor: deletedPrefix.length, focus: deletedPrefix.length };
+  }
+  const sourceIsLegacy = legacy.has(sourceName) && value !== '';
   let sourceEndIndex = sourceIndex;
-  if (!sourceIsLegacy) {
+  if (joinedEndIndex !== undefined) {
+    sourceEndIndex = joinedEndIndex;
+  } else if (!sourceIsLegacy) {
     while (
       softBreaks.has(sourceEndIndex) &&
       sourceEndIndex + 1 < targets.length &&
@@ -363,10 +409,13 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     )
       sourceEndIndex++;
   }
-  const continuationValue = targets
-    .slice(sourceIndex + 1, sourceEndIndex + 1)
-    .map(({ name }) => inputs[name] || '')
-    .join('');
+  const continuationValue =
+    joinedEndIndex === undefined
+      ? targets
+          .slice(sourceIndex + 1, sourceEndIndex + 1)
+          .map(({ name }) => inputs[name] || '')
+          .join('')
+      : '';
   const sourceValue = value + continuationValue;
   const sourceLayout = sourceIsLegacy
     ? {
@@ -377,7 +426,6 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
     return { ok: false, reason: 'source-overflow' };
   const sourceChunks = sourceLayout.chunks;
-  const selection = args.selection ?? { anchor: value.length, focus: value.length };
   const continuation =
     !sourceIsLegacy &&
     !continuationValue &&

@@ -172,9 +172,25 @@ export const bindTextFlowEditor = (
       event.preventDefault();
       if (event.inputType === 'historyUndo') binding.undo?.();
       else binding.redo?.();
+    } else if (
+      event.inputType === 'deleteContentBackward' &&
+      beforeSelection.anchor === 0 &&
+      beforeSelection.focus === 0
+    ) {
+      // The previous row belongs to a different contenteditable, so the browser
+      // cannot delete its last character or emit a useful input event here.
+      event.preventDefault();
+      const value = readTextFlowText(element);
+      void binding.commitEdit({
+        value,
+        selection: beforeSelection,
+        beforeSelection,
+        inputType: event.inputType,
+        deleteBackwardAtStart: true,
+        allowDeletionPullUp: value === '' ? true : undefined,
+      });
     } else if (event.inputType.startsWith('delete') && readTextFlowText(element) === '') {
-      // Empty contenteditables may fire beforeinput without a following input.
-      // Deleting a blank continuation still needs whole-row compaction.
+      // An empty editor may not emit input for other delete operations either.
       event.preventDefault();
       void binding.commitEdit({
         value: '',

@@ -187,4 +187,50 @@ describe('flowing Text native editor', () => {
       }),
     );
   });
+
+  it('still compacts a blank editor for other delete input types', () => {
+    const event = new InputEvent('beforeinput', {
+      inputType: 'deleteContentForward',
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: '',
+        allowDeletionPullUp: true,
+      }),
+    );
+    expect(commitEdit.mock.calls[0][0].deleteBackwardAtStart).toBeUndefined();
+  });
+
+  it('sends Backspace at a nonempty row start to the flow instead of native input', () => {
+    editor.setValue('だけです');
+    setTextFlowSelection(element, { anchor: 0, focus: 0 });
+    const event = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(element.textContent).toBe('だけです');
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+
+    commitEdit.mockClear();
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    const middle = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(middle);
+    expect(middle.defaultPrevented).toBe(false);
+    expect(commitEdit).not.toHaveBeenCalled();
+  });
 });

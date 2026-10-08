@@ -224,6 +224,7 @@ export class TextFlowController {
       selection: edit.selection,
       legacyNames: [...this.state.legacy[inputIndex]],
       preferNextRow: edit.preferNextRow,
+      deleteBackwardAtStart: edit.deleteBackwardAtStart,
       allowDeletionPullUp:
         edit.allowDeletionPullUp ?? (edit.inputType?.startsWith('delete') ? true : undefined),
     });
