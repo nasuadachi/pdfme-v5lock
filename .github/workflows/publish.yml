@@ -69,15 +69,28 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: npm run pack:local
 
+      - name: Checksum release tarballs
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd dist-tarballs/pdfme
+          tarballs=(pdfme-*-"$VERSION".tgz)
+          if [[ ${#tarballs[@]} -ne 7 ]]; then
+            echo "Expected 7 tarballs for $VERSION, found ${#tarballs[@]}" >&2
+            exit 1
+          fi
+          sha256sum "${tarballs[@]}" > "SHA256SUMS-${VERSION##*-}.txt"
+
       - name: Upload tarballs to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          assets=(dist-tarballs/pdfme/pdfme-*-"$VERSION".tgz
+                  dist-tarballs/pdfme/"SHA256SUMS-${VERSION##*-}.txt")
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release upload "$VERSION" dist-tarballs/pdfme/*.tgz --clobber
+            gh release upload "$VERSION" "${assets[@]}" --clobber
           else
-            gh release create "$VERSION" dist-tarballs/pdfme/*.tgz \
+            gh release create "$VERSION" "${assets[@]}" \
               --title "$VERSION" \
               --notes "Release $VERSION"
           fi
