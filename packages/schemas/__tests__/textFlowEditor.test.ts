@@ -83,6 +83,21 @@ describe('flowing Text native editor', () => {
     );
   });
 
+  it('recognizes Enter at the end of a row as a blank continuation', () => {
+    element.innerHTML = 'だけです。<div><br></div>';
+    const blank = element.lastChild!;
+    window.getSelection()!.setBaseAndExtent(blank, 0, blank, 0);
+    expect(readTextFlowText(element)).toBe('だけです。\n');
+    element.dispatchEvent(new InputEvent('input', { inputType: 'insertParagraph' }));
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです。\n',
+        selection: { anchor: 6, focus: 6 },
+        preferNextRow: true,
+      }),
+    );
+  });
+
   it('does not split or move focus during IME and commits once after final input', async () => {
     element.textContent = '前';
     setTextFlowSelection(element, { anchor: 1, focus: 1 });

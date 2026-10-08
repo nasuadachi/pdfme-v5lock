@@ -434,7 +434,7 @@ describe('transactional row distribution', () => {
     expect(softAfter(inserted.inputs)).toEqual([0]);
   });
 
-  test('an explicit newline can split an automatic continuation without losing its text', () => {
+  test('Enter after a soft-wrapped row inserts a blank before its saved continuation', () => {
     const rows = targets(2, 2, 2);
     const created = successful(
       distributeTextFlow({
@@ -456,9 +456,71 @@ describe('transactional row distribution', () => {
     );
     expect(bodyInputs(split.inputs)).toEqual({
       'text1-2': 'あい',
+      'text2-2': '',
+      'text3-2': 'うえ',
+    });
+    expect(softAfter(split.inputs)).toEqual([]);
+    expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter in the middle of a soft-wrapped paragraph preserves the earlier soft break', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえおか',
+      }),
+    );
+    expect(softAfter(created.inputs)).toEqual([0, 1]);
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text2-2',
+        value: 'うえ\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
       'text2-2': 'うえ',
       'text3-2': '',
+      'text4-2': 'おか',
     });
+    expect(softAfter(split.inputs)).toEqual([0]);
+    expect(split.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
+  });
+
+  test('Enter shifts a saved soft continuation and later rows, discarding only the final tail', () => {
+    const rows = targets(2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: {},
+        sourceName: 'text1-2',
+        value: 'あいうえ',
+      }),
+    );
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { ...created.inputs, 'text3-2': '甲', 'text4-2': '乙' },
+        sourceName: 'text1-2',
+        value: 'あい\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': '',
+      'text3-2': 'うえ',
+      'text4-2': '甲',
+    });
+    expect(split.discarded).toEqual([{ name: 'text4-2', value: '乙' }]);
     expect(softAfter(split.inputs)).toEqual([]);
     expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
   });

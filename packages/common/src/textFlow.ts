@@ -397,10 +397,15 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     selection = { anchor: deletedPrefix.length, focus: deletedPrefix.length };
   }
   const sourceIsLegacy = legacy.has(sourceName) && value !== '';
+  // A live newline at the end inserts an empty row before existing text below.
+  // In particular, a saved automatic continuation must become a displaced
+  // paragraph rather than being appended after the newline and filling that row.
+  const insertBlankAfterSource =
+    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value) && /[^\r\n]/.test(value);
   let sourceEndIndex = sourceIndex;
   if (joinedEndIndex !== undefined) {
     sourceEndIndex = joinedEndIndex;
-  } else if (!sourceIsLegacy) {
+  } else if (!sourceIsLegacy && !insertBlankAfterSource) {
     while (
       softBreaks.has(sourceEndIndex) &&
       sourceEndIndex + 1 < targets.length &&
