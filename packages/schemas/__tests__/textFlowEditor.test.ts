@@ -249,4 +249,69 @@ describe('flowing Text native editor', () => {
     expect(middle.defaultPrevented).toBe(false);
     expect(commitEdit).not.toHaveBeenCalled();
   });
+
+  it('handles row-start Backspace keydown without beforeinput and ignores a duplicate beforeinput', async () => {
+    editor.setValue('だけです');
+    window.getSelection()!.setBaseAndExtent(element.firstChild!, 0, element.firstChild!, 0);
+    const keydown = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(keydown);
+
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledTimes(1);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: 'だけです',
+        selection: { anchor: 0, focus: 0 },
+        inputType: 'deleteContentBackward',
+        deleteBackwardAtStart: true,
+      }),
+    );
+
+    const duplicate = new InputEvent('beforeinput', {
+      inputType: 'deleteContentBackward',
+      cancelable: true,
+    });
+    element.dispatchEvent(duplicate);
+    expect(duplicate.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledTimes(1);
+
+    await Promise.resolve();
+    element.dispatchEvent(
+      new InputEvent('beforeinput', { inputType: 'deleteContentBackward', cancelable: true }),
+    );
+    expect(commitEdit).toHaveBeenCalledTimes(2);
+  });
+
+  it('handles Backspace keydown from an empty row', () => {
+    const keydown = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(keydown);
+    expect(keydown.defaultPrevented).toBe(true);
+    expect(commitEdit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: '',
+        deleteBackwardAtStart: true,
+        allowDeletionPullUp: true,
+      }),
+    );
+  });
+
+  it('keeps native Backspace for a mid-row caret, selected text, or active IME', () => {
+    editor.setValue('だけです');
+    setTextFlowSelection(element, { anchor: 1, focus: 1 });
+    const middle = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(middle);
+    expect(middle.defaultPrevented).toBe(false);
+
+    setTextFlowSelection(element, { anchor: 0, focus: 1 });
+    const selected = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(selected);
+    expect(selected.defaultPrevented).toBe(false);
+
+    setTextFlowSelection(element, { anchor: 0, focus: 0 });
+    element.dispatchEvent(new CompositionEvent('compositionstart'));
+    const composing = new KeyboardEvent('keydown', { key: 'Backspace', cancelable: true });
+    element.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    expect(commitEdit).not.toHaveBeenCalled();
+  });
 });
