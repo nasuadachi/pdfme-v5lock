@@ -26,7 +26,11 @@ const readTextFlowContent = (root: Node, endpoint?: { node: Node; offset: number
     if (element.tagName === 'BR') {
       // Safari plaintext-only editors append a final BR for the caret after
       // Enter. The preceding BR is the actual newline; this one is a filler.
-      if (node.nextSibling === null && (node.previousSibling as Element)?.tagName === 'BR')
+      if (
+        node.parentNode === root &&
+        node.nextSibling === null &&
+        (node.previousSibling as Element)?.tagName === 'BR'
+      )
         return;
       text += '\n';
       return;
@@ -178,7 +182,6 @@ export const bindTextFlowEditor = (
       beforeSelection: selection,
       inputType: 'deleteContentBackward',
       deleteBackwardAtStart: true,
-      allowDeletionPullUp: value === '' ? true : undefined,
     });
   };
   const beforeInput = (event: InputEvent) => {
@@ -201,16 +204,6 @@ export const bindTextFlowEditor = (
       // cannot delete its last character or emit a useful input event here.
       event.preventDefault();
       deleteBackwardAtStart(beforeSelection);
-    } else if (event.inputType.startsWith('delete') && readTextFlowText(element) === '') {
-      // An empty editor may not emit input for other delete operations either.
-      event.preventDefault();
-      void binding.commitEdit({
-        value: '',
-        selection: beforeSelection,
-        beforeSelection,
-        inputType: event.inputType,
-        allowDeletionPullUp: true,
-      });
     }
   };
   const input = (event: Event) => {

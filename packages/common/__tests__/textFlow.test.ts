@@ -194,16 +194,23 @@ describe('transactional row distribution', () => {
     expect(rows.slice(0, 3).map(({ name }) => longAscii.inputs[name].length)).toEqual([40, 40, 20]);
   });
 
-  test('mixed newline styles and empty lines split by each destination limit without trimming spaces', () => {
+  test('mixed newline styles preserve empty lines and split by each destination limit', () => {
     const result = successful(
       distributeTextFlow({
-        targets: targets(2, 1, 3, 2, 2),
+        targets: targets(2, 1, 3, 2, 2, 2),
         inputs: {},
         sourceName: 'text1-2',
         value: 'あいうえお\r\n\r\n  \rか\n',
       }),
     );
-    expect(Object.values(bodyInputs(result.inputs))).toEqual(['あい', 'う', 'えお', '  ', 'か']);
+    expect(Object.values(bodyInputs(result.inputs))).toEqual([
+      'あい',
+      'う',
+      'えお',
+      '',
+      '  ',
+      'か',
+    ]);
   });
 
   test('starts at clicked row and keeps later paragraphs separate while pushing them', () => {
@@ -271,7 +278,26 @@ describe('transactional row distribution', () => {
     expect(before).toEqual({ 'text1-4': '甲乙丙欄', 'text2-4': 'だけです', 'text3-4': '' });
   });
 
-  test('Backspace on a blank row deletes the preceding final grapheme and closes the blank row', () => {
+  test('row-start Backspace preserves an unrelated blank paragraph below the joined rows', () => {
+    const joined = successful(
+      distributeTextFlow({
+        targets: targets(2, 2, 2, 2),
+        inputs: { 'text1-2': '甲乙', 'text2-2': '丙', 'text3-2': '', 'text4-2': '丁' },
+        sourceName: 'text2-2',
+        value: '丙',
+        selection: { anchor: 0, focus: 0 },
+        deleteBackwardAtStart: true,
+      }),
+    );
+    expect(bodyInputs(joined.inputs)).toEqual({
+      'text1-2': '甲丙',
+      'text2-2': '',
+      'text3-2': '丁',
+      'text4-2': '',
+    });
+  });
+
+  test('Backspace on a blank row deletes the preceding final grapheme without closing the blank row', () => {
     const before = {
       'text1-4': '甲乙丙欄',
       'text2-4': '',
@@ -290,9 +316,9 @@ describe('transactional row distribution', () => {
     );
     expect(bodyInputs(edited.inputs)).toEqual({
       'text1-4': '甲乙丙',
-      'text2-4': 'だけです',
-      'text3-4': '後',
-      'text4-4': '',
+      'text2-4': '',
+      'text3-4': 'だけです',
+      'text4-4': '後',
     });
     expect(softAfter(edited.inputs)).toEqual([]);
     expect(edited.selection).toEqual({ name: 'text1-4', anchor: 3, focus: 3 });
@@ -314,9 +340,9 @@ describe('transactional row distribution', () => {
       );
       expect(bodyInputs(edited.inputs)).toEqual({
         'text1-4': '',
-        'text2-4': '次',
-        'text3-4': '後',
-        'text4-4': '',
+        'text2-4': '',
+        'text3-4': '次',
+        'text4-4': '後',
       });
       expect(edited.selection).toEqual({ name: 'text1-4', anchor: 0, focus: 0 });
     },
@@ -345,8 +371,8 @@ describe('transactional row distribution', () => {
     expect(bodyInputs(edited.inputs)).toEqual({
       'text1-2': 'あい',
       'text2-2': 'う',
-      'text3-2': '後',
-      'text4-2': '',
+      'text3-2': '',
+      'text4-2': '後',
     });
     expect(softAfter(edited.inputs)).toEqual([0]);
     expect(edited.selection).toEqual({ name: 'text2-2', anchor: 1, focus: 1 });
@@ -488,6 +514,42 @@ describe('transactional row distribution', () => {
     expect(softAfter(deleted.inputs)).toEqual([0]);
   });
 
+  test('emptying one soft row keeps its link when the following continuation fills it', () => {
+    const rows = targets(2, 2, 2);
+    const created = successful(
+      distributeTextFlow({ targets: rows, inputs: {}, sourceName: 'text1-2', value: 'あいうえお' }),
+    );
+    expect(softAfter(created.inputs)).toEqual([0, 1]);
+    const deleted = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: created.inputs,
+        sourceName: 'text2-2',
+        value: '',
+        selection: { anchor: 0, focus: 0 },
+      }),
+    );
+    expect(bodyInputs(deleted.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'お',
+      'text3-2': '',
+    });
+    expect(softAfter(deleted.inputs)).toEqual([0]);
+    const shortened = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: deleted.inputs,
+        sourceName: 'text1-2',
+        value: 'あ',
+      }),
+    );
+    expect(bodyInputs(shortened.inputs)).toEqual({
+      'text1-2': 'あお',
+      'text2-2': '',
+      'text3-2': '',
+    });
+  });
+
   test('explicit newline remains a hard boundary even when the preceding row is full', () => {
     const rows = targets(2, 2, 2);
     const created = successful(
@@ -542,6 +604,46 @@ describe('transactional row distribution', () => {
     });
     expect(softAfter(split.inputs)).toEqual([]);
     expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+  });
+
+  test('later reflow retains the blank paragraph inserted by Enter', () => {
+    const rows = targets(2, 2, 2, 2, 2);
+    const created = successful(
+      distributeTextFlow({ targets: rows, inputs: {}, sourceName: 'text1-2', value: 'あいうえ' }),
+    );
+    const split = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: { ...created.inputs, 'text4-2': '後' },
+        sourceName: 'text2-2',
+        value: 'うえ\n',
+        selection: { anchor: 3, focus: 3 },
+        preferNextRow: true,
+      }),
+    );
+    expect(bodyInputs(split.inputs)).toEqual({
+      'text1-2': 'あい',
+      'text2-2': 'うえ',
+      'text3-2': '',
+      'text4-2': '',
+      'text5-2': '後',
+    });
+    const edited = successful(
+      distributeTextFlow({
+        targets: rows,
+        inputs: split.inputs,
+        sourceName: 'text1-2',
+        value: 'あ',
+        selection: { anchor: 1, focus: 1 },
+      }),
+    );
+    expect(bodyInputs(edited.inputs)).toEqual({
+      'text1-2': 'あう',
+      'text2-2': 'え',
+      'text3-2': '',
+      'text4-2': '',
+      'text5-2': '後',
+    });
   });
 
   test('Enter in the middle of a soft-wrapped paragraph preserves the earlier soft break', () => {
@@ -606,7 +708,7 @@ describe('transactional row distribution', () => {
     expect(split.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
   });
 
-  test('a newline at the start of an automatic continuation makes that boundary hard', () => {
+  test('a newline at the start of an automatic continuation inserts a hard blank row', () => {
     const rows = targets(2, 2, 2);
     const created = successful(
       distributeTextFlow({
@@ -626,8 +728,8 @@ describe('transactional row distribution', () => {
     );
     expect(bodyInputs(split.inputs)).toEqual({
       'text1-2': 'あい',
-      'text2-2': 'うえ',
-      'text3-2': '',
+      'text2-2': '',
+      'text3-2': 'うえ',
     });
     expect(softAfter(split.inputs)).toEqual([]);
   });
@@ -697,7 +799,7 @@ describe('transactional row distribution', () => {
     expect(input).toEqual({ 'text1-1': '旧', 'text2-1': '次' });
   });
 
-  test('shortening does not pull rows up, but emptying source pulls whole following rows', () => {
+  test('shortening and emptying a hard paragraph leave following rows in place', () => {
     const input = { 'text1-2': 'あい', 'text2-2': 'う', 'text3-2': '', 'text4-2': 'え' };
     const short = successful(
       distributeTextFlow({
@@ -717,53 +819,44 @@ describe('transactional row distribution', () => {
       }),
     );
     expect(deleted.inputs).toEqual({
-      'text1-2': 'う',
-      'text2-2': 'え',
+      'text1-2': '',
+      'text2-2': 'う',
       'text3-2': '',
-      'text4-2': '',
+      'text4-2': 'え',
     });
     expect(deleted.selection).toEqual({ name: 'text1-2', anchor: 0, focus: 0 });
   });
 
-  test('explicit deletion compacts an already blank continuation while empty edit does not', () => {
+  test('Backspace at the first blank row leaves following rows in place', () => {
     const input = { 'text1-2': '', 'text2-2': '次' };
-    const idle = successful(
-      distributeTextFlow({
-        targets: targets(2, 2),
-        inputs: input,
-        sourceName: 'text1-2',
-        value: '',
-      }),
-    );
-    expect(idle.inputs).toEqual(input);
     const deleted = successful(
       distributeTextFlow({
         targets: targets(2, 2),
         inputs: input,
         sourceName: 'text1-2',
         value: '',
-        allowDeletionPullUp: true,
+        deleteBackwardAtStart: true,
       }),
     );
-    expect(deleted.inputs).toEqual({ 'text1-2': '次', 'text2-2': '' });
+    expect(deleted.inputs).toEqual(input);
   });
 
-  test('live trailing newline reserves one continuation even in an empty row; paste does not', () => {
-    const input = { 'text1-2': 'あ', 'text2-2': '次', 'text3-2': '' };
+  test('live trailing newlines reserve every blank row; a pasted trailing newline does not', () => {
+    const input = { 'text1-2': 'あ', 'text2-2': '次', 'text3-2': '', 'text4-2': '' };
     const live = successful(
       distributeTextFlow({
-        targets: targets(2, 2, 2),
+        targets: targets(2, 2, 2, 2),
         inputs: input,
         sourceName: 'text1-2',
         value: 'あ\n\n',
         preferNextRow: true,
       }),
     );
-    expect(live.inputs).toEqual({ 'text1-2': 'あ', 'text2-2': '', 'text3-2': '次' });
-    expect(live.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+    expect(live.inputs).toEqual({ 'text1-2': 'あ', 'text2-2': '', 'text3-2': '', 'text4-2': '次' });
+    expect(live.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
     const paste = successful(
       distributeTextFlow({
-        targets: targets(2, 2, 2),
+        targets: targets(2, 2, 2, 2),
         inputs: input,
         sourceName: 'text1-2',
         value: 'あ\n',
@@ -772,15 +865,15 @@ describe('transactional row distribution', () => {
     expect(paste.inputs).toEqual(input);
     const empty = successful(
       distributeTextFlow({
-        targets: targets(2, 2, 2),
+        targets: targets(2, 2, 2, 2),
         inputs: { ...input, 'text1-2': '' },
         sourceName: 'text1-2',
         value: '\n\n',
         preferNextRow: true,
       }),
     );
-    expect(empty.inputs).toEqual({ 'text1-2': '', 'text2-2': '', 'text3-2': '次' });
-    expect(empty.selection).toEqual({ name: 'text2-2', anchor: 0, focus: 0 });
+    expect(empty.inputs).toEqual({ 'text1-2': '', 'text2-2': '', 'text3-2': '', 'text4-2': '次' });
+    expect(empty.selection).toEqual({ name: 'text3-2', anchor: 0, focus: 0 });
     expect(
       distributeTextFlow({
         targets: targets(2),

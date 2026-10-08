@@ -225,8 +225,6 @@ export class TextFlowController {
       legacyNames: [...this.state.legacy[inputIndex]],
       preferNextRow: edit.preferNextRow,
       deleteBackwardAtStart: edit.deleteBackwardAtStart,
-      allowDeletionPullUp:
-        edit.allowDeletionPullUp ?? (edit.inputType?.startsWith('delete') ? true : undefined),
     });
     if (!result.ok) {
       this.restoreFocus(beforeFocus);

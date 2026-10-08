@@ -202,11 +202,25 @@ test('failed body persistence preserves ordinary edits made during the wait', as
   expect(f.commit).toHaveBeenCalledTimes(1);
 });
 
-test('a live newline creates a blank continuation and deleting it pulls whole paragraphs up', () => {
+test('a live newline keeps its blank row through edits and row-start Backspace', () => {
   const f = make({ [names[0]]: 'あ', [names[1]]: '甲', [names[2]]: '乙', [names[3]]: '' });
   f.binding().commitEdit({ value: 'あ\n', selection: selection(2), preferNextRow: true });
-  expect(f.inputs()[0]).toEqual({
+  const withBlank = {
     [names[0]]: 'あ',
+    [names[1]]: '',
+    [names[2]]: '甲',
+    [names[3]]: '乙',
+  };
+  expect(f.inputs()[0]).toEqual(withBlank);
+  f.binding(names[1]).commitEdit({
+    value: '',
+    selection: selection(0),
+    inputType: 'deleteContentForward',
+  });
+  expect(f.inputs()[0]).toEqual(withBlank);
+  f.binding().commitEdit({ value: 'い', selection: selection(1), inputType: 'insertText' });
+  expect(f.inputs()[0]).toEqual({
+    [names[0]]: 'い',
     [names[1]]: '',
     [names[2]]: '甲',
     [names[3]]: '乙',
@@ -215,12 +229,13 @@ test('a live newline creates a blank continuation and deleting it pulls whole pa
     value: '',
     selection: selection(0),
     inputType: 'deleteContentBackward',
+    deleteBackwardAtStart: true,
   });
   expect(f.inputs()[0]).toEqual({
-    [names[0]]: 'あ',
-    [names[1]]: '甲',
-    [names[2]]: '乙',
-    [names[3]]: '',
+    [names[0]]: '',
+    [names[1]]: '',
+    [names[2]]: '甲',
+    [names[3]]: '乙',
   });
 });
 

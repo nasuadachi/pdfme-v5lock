@@ -49,6 +49,8 @@ describe('flowing Text native editor', () => {
     expect(readTextFlowText(element)).toBe('A\n\n');
     element.innerHTML = 'A<div><br></div>C';
     expect(readTextFlowText(element)).toBe('A\n\nC');
+    element.innerHTML = 'A<span><br><br></span>B';
+    expect(readTextFlowText(element)).toBe('A\n\nB');
   });
 
   it('counts a caret at a block-to-text boundary using its original sibling context', () => {
@@ -68,7 +70,7 @@ describe('flowing Text native editor', () => {
     });
     element.dispatchEvent(event);
     expect(commitEdit).toHaveBeenCalledWith(
-      expect.objectContaining({ value: '', allowDeletionPullUp: true }),
+      expect.objectContaining({ value: '', deleteBackwardAtStart: true }),
     );
     element.textContent = '\n';
     expect(readTextFlowText(element)).toBe('\n');
@@ -227,26 +229,19 @@ describe('flowing Text native editor', () => {
       expect.objectContaining({
         value: '',
         inputType: 'deleteContentBackward',
-        allowDeletionPullUp: true,
         deleteBackwardAtStart: true,
       }),
     );
   });
 
-  it('still compacts a blank editor for other delete input types', () => {
+  it('leaves a blank editor in place for other delete input types', () => {
     const event = new InputEvent('beforeinput', {
       inputType: 'deleteContentForward',
       cancelable: true,
     });
     element.dispatchEvent(event);
-    expect(event.defaultPrevented).toBe(true);
-    expect(commitEdit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: '',
-        allowDeletionPullUp: true,
-      }),
-    );
-    expect(commitEdit.mock.calls[0][0].deleteBackwardAtStart).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+    expect(commitEdit).not.toHaveBeenCalled();
   });
 
   it('sends Backspace at a nonempty row start to the flow instead of native input', () => {
@@ -319,7 +314,6 @@ describe('flowing Text native editor', () => {
       expect.objectContaining({
         value: '',
         deleteBackwardAtStart: true,
-        allowDeletionPullUp: true,
       }),
     );
   });

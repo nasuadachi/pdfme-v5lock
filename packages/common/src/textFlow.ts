@@ -42,7 +42,6 @@ export type TextFlowEdit = {
   beforeSelection?: TextFlowSelection;
   inputType?: string;
   preferNextRow?: boolean;
-  allowDeletionPullUp?: boolean;
   /** Backspace at a row start deletes the preceding row's last grapheme and joins the rows. */
   deleteBackwardAtStart?: boolean;
 };
@@ -230,7 +229,7 @@ const readSoftBreaks = (inputs: Readonly<Record<string, string>>): SavedSoftBrea
 const softBreakPageKey = (targets: ReadonlyArray<TextFlowTarget>) =>
   JSON.stringify(targets.map(({ name, maxLength }) => [name, maxLength]));
 
-/** Newline offsets are retained for caret mapping, while truly empty lines are omitted. */
+/** Newline offsets are retained for caret mapping, including explicit empty lines. */
 const layoutValue = (
   value: string,
   targets: ReadonlyArray<TextFlowTarget>,
@@ -239,7 +238,15 @@ const layoutValue = (
   const chunks: Chunk[] = [];
   const lines = value.matchAll(/([^\r\n]*)(?:\r\n|\r|\n|$)/g);
   for (const line of lines) {
-    if (!line[1]) continue;
+    if (!line[1]) {
+      // The last zero-length match only terminates the regexp. Every empty
+      // line followed by a newline is a real paragraph and occupies a row.
+      if (!/[\r\n]$/.test(line[0])) continue;
+      const targetIndex = startIndex + chunks.length;
+      if (!targets[targetIndex]) return { chunks, overflowStart: line.index };
+      chunks.push({ value: '', start: line.index, end: line.index, targetIndex, legacy: false });
+      continue;
+    }
     const graphemes = getGraphemes(line[1], line.index);
     let text = '';
     let width = 0;
@@ -286,7 +293,6 @@ export type DistributeTextFlowArgs = {
   selection?: TextFlowSelection;
   legacyNames?: ReadonlyArray<string>;
   preferNextRow?: boolean;
-  allowDeletionPullUp?: boolean;
   deleteBackwardAtStart?: boolean;
 };
 export type TextFlowDistribution =
@@ -373,7 +379,10 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
       !legacy.has(targets[previousStartIndex - 1].name)
     )
       previousStartIndex--;
-    joinedEndIndex = currentIndex;
+    // A nonempty current row joins the preceding paragraph. An empty row is
+    // an explicit blank paragraph: delete the preceding grapheme, but leave
+    // that row and everything below it in place.
+    joinedEndIndex = deletingFromEmptyRow ? currentIndex - 1 : currentIndex;
     while (
       softBreaks.has(joinedEndIndex) &&
       joinedEndIndex + 1 < targets.length &&
@@ -401,8 +410,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   // A live newline at the end inserts an empty row before existing text below.
   // In particular, a saved automatic continuation must become a displaced
   // paragraph rather than being appended after the newline and filling that row.
-  const insertBlankAfterSource =
-    !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value);
+  const insertBlankAfterSource = !sourceIsLegacy && args.preferNextRow && /[\r\n]$/.test(value);
   let sourceEndIndex = sourceIndex;
   if (joinedEndIndex !== undefined) {
     sourceEndIndex = joinedEndIndex;
@@ -432,23 +440,12 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
     return { ok: false, reason: 'source-overflow' };
   const sourceChunks = sourceLayout.chunks;
-  // An explicit Enter in an empty row still occupies that row. Reserve the
-  // next row for the caret and shift every existing row below it.
-  if (insertBlankAfterSource && sourceChunks.length === 0) {
+  // Emptying a paragraph keeps its row. This also covers deleting the sole
+  // grapheme before an empty row and pressing Enter in an empty row.
+  if (sourceChunks.length === 0) {
     sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
   }
-  // Deleting the only grapheme before an empty row leaves the preceding row
-  // empty. Keep that row while closing the current one and pulling later rows up.
-  if (deletingFromEmptyRow && sourceChunks.length === 0) {
-    sourceChunks.push({ value: '', start: 0, end: 0, targetIndex: sourceIndex, legacy: false });
-  }
-  const continuation =
-    !sourceIsLegacy &&
-    !continuationValue &&
-    args.preferNextRow &&
-    /[\r\n]$/.test(value) &&
-    sourceChunks.length > 0;
-  if (continuation) {
+  if (insertBlankAfterSource) {
     const targetIndex = sourceIndex + sourceChunks.length;
     if (!targets[targetIndex]) return { ok: false, reason: 'source-overflow' };
     sourceChunks.push({
@@ -459,28 +456,26 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
       legacy: false,
     });
   }
-  const pullUp =
-    value === '' &&
-    args.allowDeletionPullUp !== false &&
-    (args.allowDeletionPullUp === true || Boolean(inputs[sourceName]));
+  // Keep a preceding automatic wrap when text from the next soft row fills
+  // this row. A new empty or explicitly separated row ends that wrap.
+  const breaksPreviousSoftRow =
+    softBreaks.has(sourceIndex - 1) && (/^[\r\n]/.test(value) || sourceChunks[0].value === '');
   const result = { ...inputs };
   const discarded: TextFlowChangedValue[] = [];
 
   if (
     sourceEndIndex === sourceIndex &&
-    sourceChunks.length <= 1 &&
-    !continuation &&
-    !pullUp &&
-    !(/^[\r\n]/.test(value) && softBreaks.has(sourceIndex - 1))
+    sourceChunks.length === 1 &&
+    !insertBlankAfterSource &&
+    !breaksPreviousSoftRow
   ) {
-    result[sourceName] = sourceChunks[0]?.value ?? '';
+    result[sourceName] = sourceChunks[0].value;
     if (!sourceIsLegacy) legacy.delete(sourceName);
   } else {
     const paragraphs: { name: string; value: string; legacy: boolean }[] = [];
     for (let index = sourceEndIndex + 1; index < targets.length; index++) {
       const name = targets[index].name;
       let paragraph = inputs[name] || '';
-      if (!paragraph && !insertBlankAfterSource) continue;
       const isLegacy = legacy.has(name);
       if (!isLegacy) {
         while (
@@ -498,7 +493,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
       legacy.delete(name);
     }
     const nextSoftBreaks = new Set([...softBreaks].filter((index) => index < sourceIndex));
-    if (/^[\r\n]/.test(value) || sourceChunks.length === 0) nextSoftBreaks.delete(sourceIndex - 1);
+    if (breaksPreviousSoftRow) nextSoftBreaks.delete(sourceIndex - 1);
     const place = (chunks: Chunk[]) => {
       chunks.forEach((chunk, index) => {
         const name = targets[chunk.targetIndex].name;
