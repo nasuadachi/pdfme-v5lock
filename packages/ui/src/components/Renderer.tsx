@@ -172,6 +172,7 @@ const Renderer = (props: RendererProps) => {
           commitEdit: (edit: Parameters<typeof textFlow.commitEdit>[0]) =>
             textFlow.commitEdit(edit),
           moveCaretVertically: textFlow.moveCaretVertically,
+          moveCaretHorizontally: textFlow.moveCaretHorizontally,
           clearVerticalNavigation: textFlow.clearVerticalNavigation,
           undo: textFlow.undo ? () => textFlow.undo?.() : undefined,
           redo: textFlow.redo ? () => textFlow.redo?.() : undefined,

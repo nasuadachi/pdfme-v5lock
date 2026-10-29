@@ -63,8 +63,9 @@ export type TextFlowBinding = {
   isLegacy: boolean;
   registerEditor(editor: TextFlowEditor): () => void;
   commitEdit(edit: TextFlowEdit): void | Promise<void>;
-  /** Move between text rows on the same displayed page without editing their values. */
+  /** Move between text rows in the enabled flow without editing their values. */
   moveCaretVertically?: (direction: 'up' | 'down', selection: TextFlowSelection) => boolean;
+  moveCaretHorizontally?: (direction: 'left' | 'right', selection: TextFlowSelection) => boolean;
   clearVerticalNavigation?: () => void;
   undo?(): void;
   redo?(): void;

@@ -118,6 +118,9 @@ export class TextFlowController {
   private state: Snapshot;
   private committed: Snapshot;
   private readonly bindings = new Map<string, TextFlowBinding>();
+  private readonly focusPageListeners = new Set<
+    (page: Pick<Focus, 'inputIndex' | 'pageIndex'>) => void
+  >();
   private readonly editors = new Map<string, TextFlowEditor>();
   private readonly editorValues = new Map<string, { value: string; legacy: boolean }>();
   private readonly displayedSchemas = new Map<number, Schema[][]>();
@@ -170,6 +173,7 @@ export class TextFlowController {
   }
 
   public dispose() {
+    this.focusPageListeners.clear();
     this.epoch += 1;
     this.queue = [];
     this.draining = undefined;
@@ -218,6 +222,10 @@ export class TextFlowController {
   private notifyProgress(focus: Focus | undefined) {
     if (!focus || !this.getOptions().crossPage) return;
     const current = this.getCurrentFocus(focus);
+    const editor =
+      current && this.editors.get(editorKey(current.inputIndex, current.pageIndex, current.name));
+    // A delayed save must not replace the destination reported by a later caret move.
+    if (editor?.element && editor.element.ownerDocument.activeElement !== editor.element) return;
     if (current)
       this.getOptions().onProgress?.({
         inputIndex: current.inputIndex,
@@ -234,6 +242,28 @@ export class TextFlowController {
         pageIndex: focus.pageIndex,
         overflowText: text,
       });
+  }
+
+  /** A view follows actual caret movement, independently of input commits or saves. */
+  public subscribeFocusPage(listener: (page: Pick<Focus, 'inputIndex' | 'pageIndex'>) => void) {
+    this.focusPageListeners.add(listener);
+    return () => {
+      this.focusPageListeners.delete(listener);
+    };
+  }
+
+  private focusEditor(focus: Focus): boolean {
+    const current = this.getCurrentFocus(focus);
+    if (!current || this.hasComposition()) return false;
+    const editor = this.editors.get(editorKey(current.inputIndex, current.pageIndex, current.name));
+    if (!editor) return false;
+    editor.focusSelection(current.selection);
+    if (editor.element && editor.element.ownerDocument.activeElement !== editor.element)
+      return false;
+    this.notifyProgress(current);
+    for (const listener of [...this.focusPageListeners])
+      listener({ inputIndex: current.inputIndex, pageIndex: current.pageIndex });
+    return true;
   }
 
   private getCurrentFocus(focus?: Focus): Focus | undefined {
@@ -306,15 +336,16 @@ export class TextFlowController {
           (source.element && source.element.ownerDocument.activeElement !== source.element)
         )
           return false;
-        const page = this.getSchemas(inputIndex)[pageIndex];
-        if (!page) return false;
-        const { targets, invalidReason } = getTextFlowTargets(page);
+        const { targets, invalidReason } = this.getTargets(inputIndex, pageIndex);
         if (invalidReason) return false;
         const sourceIndex = targets.findIndex(({ name }) => name === schema.name);
         if (sourceIndex < 0) return false;
         const target = targets[sourceIndex + (direction === 'up' ? -1 : 1)];
         if (!target) return false;
-        const nextKey = editorKey(inputIndex, pageIndex, target.name);
+        const nextPageIndex = this.getSchemas(inputIndex).findIndex((page) =>
+          page.some(({ name }) => name === target.name),
+        );
+        const nextKey = editorKey(inputIndex, nextPageIndex, target.name);
         const destination = this.editors.get(nextKey);
         if (!destination || destination.isComposing()) return false;
         if (destination.element) {
@@ -356,15 +387,46 @@ export class TextFlowController {
         const offset =
           visualCaretOffset(destination.element, targetValue, direction, x) ??
           targetStart + getTextFlowOffsetAtWidth(targetValue.slice(targetStart, targetEnd), width);
-        destination.focusSelection({ anchor: offset, focus: offset });
         if (
-          destination.element &&
-          destination.element.ownerDocument.activeElement !== destination.element
+          !this.focusEditor({
+            inputIndex,
+            pageIndex: nextPageIndex,
+            name: target.name,
+            selection: { anchor: offset, focus: offset },
+          })
         )
           return false;
-        destination.element?.scrollIntoView?.({ block: 'nearest' });
+        if (nextPageIndex === pageIndex)
+          destination.element?.scrollIntoView?.({ block: 'nearest' });
         this.verticalNavigation = { key: nextKey, offset, width, x };
         return true;
+      },
+      moveCaretHorizontally: (direction, selection) => {
+        if (!isCurrent() || !this.getOptions().crossPage || selection.anchor !== selection.focus)
+          return false;
+        const source = this.editors.get(key);
+        if (
+          !source ||
+          (source.element && source.element.ownerDocument.activeElement !== source.element)
+        )
+          return false;
+        const value = this.state.inputs[inputIndex]?.[schema.name] ?? '';
+        if (selection.focus !== (direction === 'left' ? 0 : value.length)) return false;
+        const { targets, invalidReason } = this.getTargets(inputIndex, pageIndex);
+        if (invalidReason) return false;
+        const index = targets.findIndex(({ name }) => name === schema.name);
+        if (index < 0) return false;
+        const target = targets[index + (direction === 'left' ? -1 : 1)];
+        if (!target) return false;
+        const offset =
+          direction === 'left' ? (this.state.inputs[inputIndex]?.[target.name] ?? '').length : 0;
+        this.verticalNavigation = undefined;
+        return this.focusEditor({
+          inputIndex,
+          pageIndex,
+          name: target.name,
+          selection: { anchor: offset, focus: offset },
+        });
       },
       clearVerticalNavigation: () => {
         if (isCurrent()) this.verticalNavigation = undefined;
@@ -673,7 +735,7 @@ export class TextFlowController {
       focus.selection,
       this.state.legacy[focus.inputIndex]?.has(focus.name),
     );
-    if (!this.hasComposition()) editor?.focusSelection(focus.selection);
+    this.focusEditor(focus);
   }
 
   private syncEditors(focus?: Focus, moveFocus = true) {
@@ -692,12 +754,7 @@ export class TextFlowController {
         editor.setValue(value, isFocus ? currentFocus.selection : undefined, legacy);
       }
     });
-    if (currentFocus && moveFocus) {
-      const editor = this.editors.get(
-        editorKey(currentFocus.inputIndex, currentFocus.pageIndex, currentFocus.name),
-      );
-      if (!this.hasComposition()) editor?.focusSelection(currentFocus.selection);
-    }
+    if (currentFocus && moveFocus) this.focusEditor(currentFocus);
   }
 
   private hasComposition() {

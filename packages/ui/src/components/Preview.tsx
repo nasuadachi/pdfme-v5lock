@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useContext } from 'react';
+import React, { useRef, useState, useEffect, useContext, useCallback } from 'react';
 import {
   Template,
   SchemaForUI,
@@ -61,6 +61,56 @@ const Preview = ({
   });
 
   const isForm = Boolean(onChangeInput);
+  const pageNavigation = useRef({
+    unitCursor,
+    pageCursor,
+    pageSizes,
+    scale,
+    totalPages: schemasList.length,
+    onPageChange,
+    crossPage: options.textFlow?.crossPage === true,
+  });
+  pageNavigation.current = {
+    unitCursor,
+    pageCursor,
+    pageSizes,
+    scale,
+    totalPages: schemasList.length,
+    onPageChange,
+    crossPage: options.textFlow?.crossPage === true,
+  };
+
+  // Both explicit page controls and caret navigation use this single view operation.
+  const showPage = useCallback((pageIndex: number) => {
+    const view = pageNavigation.current;
+    if (
+      !containerRef.current ||
+      !Number.isInteger(pageIndex) ||
+      pageIndex < 0 ||
+      pageIndex >= view.totalPages ||
+      !view.pageSizes[pageIndex]
+    )
+      return;
+    view.pageCursor = pageIndex;
+    containerRef.current.scrollTop = getPagesScrollTopByIndex(
+      view.pageSizes,
+      pageIndex,
+      view.scale,
+    );
+    setPageCursor(pageIndex);
+    view.onPageChange?.({ currentPage: pageIndex, totalPages: view.totalPages });
+  }, []);
+
+  useEffect(
+    () =>
+      textFlowController?.subscribeFocusPage(({ inputIndex, pageIndex }) => {
+        const view = pageNavigation.current;
+        if (!view.crossPage || inputIndex !== view.unitCursor || pageIndex === view.pageCursor)
+          return;
+        showPage(pageIndex);
+      }),
+    [textFlowController, showPage],
+  );
 
   const input = inputs[unitCursor];
   // Bind against the pages currently on screen, including expanded table pages.
@@ -150,6 +200,8 @@ const Preview = ({
     scale,
     pageCursor,
     onChangePageCursor: (p) => {
+      if (pageNavigation.current.pageCursor === p) return;
+      pageNavigation.current.pageCursor = p;
       setPageCursor(p);
       if (onPageChange) {
         onPageChange({ currentPage: p, totalPages: schemasList.length });
@@ -201,14 +253,7 @@ const Preview = ({
         size={size}
         pageCursor={pageCursor}
         pageNum={schemasList.length}
-        setPageCursor={(p) => {
-          if (!containerRef.current) return;
-          containerRef.current.scrollTop = getPagesScrollTopByIndex(pageSizes, p, scale);
-          setPageCursor(p);
-          if (onPageChange) {
-            onPageChange({ currentPage: p, totalPages: schemasList.length });
-          }
-        }}
+        setPageCursor={showPage}
         zoomLevel={zoomLevel}
         setZoomLevel={setZoomLevel}
       />

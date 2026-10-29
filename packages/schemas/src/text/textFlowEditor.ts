@@ -366,6 +366,29 @@ export const bindTextFlowEditor = (
       else binding.clearVerticalNavigation?.();
       return;
     }
+    if (
+      !endingComposition &&
+      (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      const nativeSelection = element.ownerDocument.defaultView?.getSelection();
+      if (
+        !nativeSelection?.isCollapsed ||
+        !nativeSelection.anchorNode ||
+        !element.contains(nativeSelection.anchorNode)
+      )
+        return;
+      const selection = readTextFlowSelection(element);
+      if (
+        selection.anchor === selection.focus &&
+        binding.moveCaretHorizontally?.(event.key === 'ArrowLeft' ? 'left' : 'right', selection)
+      )
+        event.preventDefault();
+      return;
+    }
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
     if (event.key.toLowerCase() === 'z') {
       event.preventDefault();
