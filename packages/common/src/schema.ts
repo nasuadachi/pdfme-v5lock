@@ -177,6 +177,11 @@ export const CommonOptions = z
     textFlow: z
       .object({
         enabled: z.boolean(),
+        crossPage: z.boolean().optional(),
+        overflow: z.enum(['reject', 'truncate']).optional(),
+        onProgress: z
+          .custom<TextFlowOptions['onProgress']>((value) => typeof value === 'function')
+          .optional(),
         onBeforeDiscard: z
           .custom<TextFlowOptions['onBeforeDiscard']>((value) => typeof value === 'function')
           .optional(),

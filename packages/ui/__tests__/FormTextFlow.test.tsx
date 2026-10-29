@@ -323,3 +323,39 @@ test('a synchronous plugin notification during presave cannot commit provisional
   expect(changes).toHaveBeenCalledTimes(1);
   form.destroy();
 });
+
+test('a 4000-character transcript retains 3000 across three pages through save/reload', async () => {
+  const notice = jest.fn();
+  const form = new TestForm({
+    domContainer: document.createElement('div'),
+    template: {
+      basePdf: BLANK_A4_PDF,
+      schemas: [1, 2, 3].map((page) => [row(`text${page}-1000`)]),
+    },
+    inputs: [{}, { 'text1-1000': '別帳票' }],
+    options: {
+      textFlow: { enabled: true, crossPage: true, overflow: 'truncate', onNotice: notice },
+    },
+  });
+  act(() => {
+    form.renderForTest();
+  });
+  act(() => {
+    mockPreviewProps.textFlowController!.getBinding(0, 0, row('text1-1000'))!.commitEdit({
+      value: 'あ'.repeat(4000),
+      selection: { anchor: 4000, focus: 4000 },
+    });
+  });
+  await form.whenInputsSettled();
+  const saved = JSON.stringify(form.getInputs());
+  for (const page of [1, 2, 3]) expect(form.getInputs()[0][`text${page}-1000`]).toHaveLength(1000);
+  expect(form.getInputs()[1]['text1-1000']).toBe('別帳票');
+  expect(notice).toHaveBeenCalledWith(
+    expect.objectContaining({ type: 'truncated', overflowText: 'あ'.repeat(1000) }),
+  );
+  act(() => {
+    form.setInputs(JSON.parse(saved));
+  });
+  expect(JSON.stringify(form.getInputs())).toBe(saved);
+  form.destroy();
+});

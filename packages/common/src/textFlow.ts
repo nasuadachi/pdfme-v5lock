@@ -20,18 +20,24 @@ export type TextFlowDiscardEvent = {
 export type TextFlowNotice = {
   type:
     | 'overflow'
+    | 'truncated'
     | 'discarded'
     | 'save-failed'
     | 'save-required'
     | 'invalid-configuration'
     | 'legacy';
   message?: string;
+  overflowText?: string;
   sourceName?: string;
   pageIndex?: number;
   discarded?: ReadonlyArray<TextFlowChangedValue>;
 };
 export type TextFlowOptions = {
   enabled: boolean;
+  /** Opt in to a single, uniquely numbered flow across the document. */
+  crossPage?: boolean;
+  overflow?: 'reject' | 'truncate';
+  onProgress?: (progress: { inputIndex: number; pageIndex: number; totalPages: number }) => void;
   onBeforeDiscard?: (event: TextFlowDiscardEvent) => void | boolean | Promise<void | boolean>;
   onNotice?: (notice: TextFlowNotice) => void;
 };
@@ -308,6 +314,8 @@ const layoutValue = (
 
 export type DistributeTextFlowArgs = {
   targets: ReadonlyArray<TextFlowTarget>;
+  crossPage?: boolean;
+  overflow?: 'reject' | 'truncate';
   inputs: Readonly<Record<string, string>>;
   sourceName: string;
   value: string;
@@ -323,6 +331,7 @@ export type TextFlowDistribution =
       inputs: Record<string, string>;
       changes: TextFlowChangedValue[];
       discarded: TextFlowChangedValue[];
+      truncated?: string;
       selection: TextFlowSelection & { name: string };
       legacyNames: string[];
     };
@@ -383,6 +392,43 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   const softBreaks = new Set(
     (savedSoftBreaks[pageKey] ?? []).filter((index) => index >= 0 && index < targets.length - 1),
   );
+  // .15 saved each page separately. Preserve its automatic paragraph boundaries
+  // when a document first opts into a flow spanning those pages.
+  if (args.crossPage) {
+    const hasDocumentBreaks = Object.prototype.hasOwnProperty.call(savedSoftBreaks, pageKey);
+    for (const [key, breaks] of Object.entries(savedSoftBreaks)) {
+      if (key === pageKey) continue;
+      try {
+        const rows: unknown = JSON.parse(key);
+        if (!Array.isArray(rows) || !rows.length) continue;
+        const start = targets.findIndex(
+          (target) => JSON.stringify([target.name, target.maxLength]) === JSON.stringify(rows[0]),
+        );
+        if (
+          start < 0 ||
+          rows.some(
+            (row, index) =>
+              JSON.stringify(row) !==
+              JSON.stringify(
+                targets[start + index] && [
+                  targets[start + index].name,
+                  targets[start + index].maxLength,
+                ],
+              ),
+          )
+        )
+          continue;
+        if (!hasDocumentBreaks)
+          breaks
+            .filter((index) => index >= 0 && index < rows.length - 1)
+            .forEach((index) => softBreaks.add(start + index));
+        delete savedSoftBreaks[key];
+      } catch {
+        /* Unrelated or malformed metadata is not a paragraph boundary. */
+      }
+    }
+  }
+  if (softBreaks.size) savedSoftBreaks[pageKey] = [...softBreaks].sort((a, b) => a - b);
   let selection = args.selection ?? { anchor: value.length, focus: value.length };
   let joinedEndIndex: number | undefined;
   const deletingFromEmptyRow = args.deleteBackwardAtStart && sourceIndex > 0 && value === '';
@@ -466,8 +512,33 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
         overflowStart: undefined,
       }
     : layoutValue(sourceValue, targets, sourceIndex);
-  if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length)
-    return { ok: false, reason: 'source-overflow' };
+  let truncated: string | undefined;
+  const discarded: TextFlowChangedValue[] = [];
+  if (sourceLayout.overflowStart !== undefined && sourceLayout.overflowStart < value.length) {
+    if (args.overflow !== 'truncate') return { ok: false, reason: 'source-overflow' };
+    truncated = value.slice(sourceLayout.overflowStart);
+    // Appending new dictation needs no save. Inserting before existing text can
+    // displace an unchanged suffix, which still requires the durable backup hook.
+    const previous = getGraphemes(inputs[sourceName] || '');
+    const next = getGraphemes(value);
+    let prefix = 0;
+    while (
+      prefix < previous.length &&
+      prefix < next.length &&
+      previous[prefix].value === next[prefix].value
+    )
+      prefix++;
+    let suffix = 0;
+    while (
+      suffix < previous.length - prefix &&
+      suffix < next.length - prefix &&
+      previous[previous.length - 1 - suffix].value === next[next.length - 1 - suffix].value
+    )
+      suffix++;
+    const suffixStart = next[next.length - suffix]?.start ?? value.length;
+    const displaced = value.slice(Math.max(sourceLayout.overflowStart, suffixStart));
+    if (displaced) discarded.push({ name: sourceName, value: displaced });
+  }
   const sourceChunks = sourceLayout.chunks;
   // Emptying a paragraph keeps its row. This also covers deleting the sole
   // grapheme before an empty row and pressing Enter in an empty row.
@@ -476,21 +547,23 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
   }
   if (insertBlankAfterSource) {
     const targetIndex = sourceIndex + sourceChunks.length;
-    if (!targets[targetIndex]) return { ok: false, reason: 'source-overflow' };
-    sourceChunks.push({
-      value: '',
-      start: value.length,
-      end: value.length,
-      targetIndex,
-      legacy: false,
-    });
+    if (!targets[targetIndex] && args.overflow !== 'truncate')
+      return { ok: false, reason: 'source-overflow' };
+    if (!targets[targetIndex]) truncated = (truncated ?? '') || '\n';
+    else
+      sourceChunks.push({
+        value: '',
+        start: value.length,
+        end: value.length,
+        targetIndex,
+        legacy: false,
+      });
   }
   // Keep a preceding automatic wrap when text from the next soft row fills
   // this row. A new empty or explicitly separated row ends that wrap.
   const breaksPreviousSoftRow =
     softBreaks.has(sourceIndex - 1) && (/^[\r\n]/.test(value) || sourceChunks[0].value === '');
   const result = { ...inputs };
-  const discarded: TextFlowChangedValue[] = [];
 
   if (
     sourceEndIndex === sourceIndex &&
@@ -535,10 +608,12 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     place(sourceChunks);
     let nextIndex = sourceIndex + sourceChunks.length;
     if (sourceLayout.overflowStart !== undefined) {
-      discarded.push({
-        name: targets[sourceIndex + 1]?.name ?? sourceName,
-        value: sourceValue.slice(sourceLayout.overflowStart),
-      });
+      const existingTail = sourceValue.slice(Math.max(sourceLayout.overflowStart, value.length));
+      if (existingTail)
+        discarded.push({
+          name: targets[sourceIndex + 1]?.name ?? sourceName,
+          value: existingTail,
+        });
       nextIndex = targets.length;
     }
     for (const paragraph of paragraphs) {
@@ -576,10 +651,9 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
     }
     if (nextSoftBreaks.size) savedSoftBreaks[pageKey] = [...nextSoftBreaks].sort((a, b) => a - b);
     else delete savedSoftBreaks[pageKey];
-    if (Object.keys(savedSoftBreaks).length)
-      result[softBreaksKey] = JSON.stringify(savedSoftBreaks);
-    else delete result[softBreaksKey];
   }
+  if (Object.keys(savedSoftBreaks).length) result[softBreaksKey] = JSON.stringify(savedSoftBreaks);
+  else delete result[softBreaksKey];
   return {
     ok: true,
     inputs: result,
@@ -587,6 +661,7 @@ export const distributeTextFlow = (args: DistributeTextFlowArgs): TextFlowDistri
       result[name] !== inputs[name] ? [{ name, value: result[name] ?? '' }] : [],
     ),
     discarded,
+    ...(truncated ? { truncated } : {}),
     selection: mapSelection(sourceChunks, targets, selection, sourceIndex),
     legacyNames: [...legacy],
   };

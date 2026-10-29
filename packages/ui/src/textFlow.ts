@@ -23,6 +23,7 @@ type Transaction = History & {
   pageIndex: number;
   sourceName: string;
   discarded: { name: string; value: string }[];
+  truncated?: string;
   undo: History[];
   redo: History[];
 };
@@ -207,6 +208,34 @@ export class TextFlowController {
     return this.displayedSchemas.get(inputIndex) ?? this.getTemplate().schemas;
   }
 
+  private getTargets(inputIndex: number, pageIndex: number) {
+    const schemas = this.getSchemas(inputIndex);
+    return getTextFlowTargets(
+      this.getOptions().crossPage ? schemas.flat() : (schemas[pageIndex] ?? []),
+    );
+  }
+
+  private notifyProgress(focus: Focus | undefined) {
+    if (!focus || !this.getOptions().crossPage) return;
+    const current = this.getCurrentFocus(focus);
+    if (current)
+      this.getOptions().onProgress?.({
+        inputIndex: current.inputIndex,
+        pageIndex: current.pageIndex,
+        totalPages: this.getSchemas(current.inputIndex).length,
+      });
+  }
+
+  private notifyTruncated(text: string | undefined, focus: Focus) {
+    if (text)
+      this.getOptions().onNotice?.({
+        type: 'truncated',
+        sourceName: focus.name,
+        pageIndex: focus.pageIndex,
+        overflowText: text,
+      });
+  }
+
   private getCurrentFocus(focus?: Focus): Focus | undefined {
     if (!focus) return undefined;
     const pageIndex = this.getSchemas(focus.inputIndex).findIndex((page) =>
@@ -223,7 +252,7 @@ export class TextFlowController {
     if (schema.type !== 'text' || schema.readOnly) return undefined;
     const page = this.getSchemas(inputIndex)[pageIndex];
     if (!page) return undefined;
-    const { targets, invalidReason } = getTextFlowTargets(page);
+    const { targets, invalidReason } = this.getTargets(inputIndex, pageIndex);
     if (invalidReason) {
       if (!this.invalidPages.has(pageIndex)) {
         this.invalidPages.add(pageIndex);
@@ -370,7 +399,9 @@ export class TextFlowController {
       selection: edit.beforeSelection ?? edit.selection,
     };
     const result = distributeTextFlow({
-      targets: getTextFlowTargets(this.getSchemas(inputIndex)[pageIndex]).targets,
+      targets: this.getTargets(inputIndex, pageIndex).targets,
+      crossPage: this.getOptions().crossPage,
+      overflow: this.getOptions().overflow,
       inputs: input,
       sourceName,
       value: edit.value,
@@ -409,6 +440,8 @@ export class TextFlowController {
       const sourceActive =
         !source?.element || source.element.ownerDocument.activeElement === source.element;
       this.syncEditors(sourceActive ? afterFocus : undefined, sourceActive);
+      this.notifyProgress(afterFocus);
+      this.notifyTruncated(result.truncated, afterFocus);
       return;
     }
     const history: History = { before, after, beforeFocus, afterFocus };
@@ -423,6 +456,7 @@ export class TextFlowController {
       pageIndex,
       sourceName,
       discarded: result.discarded,
+      truncated: result.truncated,
       undo: [...this.undoHistory],
       redo: [],
     });
@@ -610,7 +644,7 @@ export class TextFlowController {
       if (epoch !== this.epoch) return;
       this.queue.shift();
       this.commitTransaction(transaction);
-      if (transaction.discarded.length)
+      if (transaction.discarded.length && !transaction.truncated)
         this.getOptions().onNotice?.({
           type: 'discarded',
           pageIndex: transaction.pageIndex,
@@ -625,6 +659,8 @@ export class TextFlowController {
     this.committedUndo = [...transaction.undo];
     this.committedRedo = [...transaction.redo];
     this.commit(copyInputs(this.committed.inputs));
+    this.notifyProgress(transaction.afterFocus);
+    if (transaction.afterFocus) this.notifyTruncated(transaction.truncated, transaction.afterFocus);
   }
 
   private restoreFocus(focus: Focus) {
